@@ -18,4 +18,4 @@ make
 - [x] Search for a password in the wordlist
 - [x] Support for searching in the Zip file without extracting it
 
-* [Original C++ port](https://github.com/mikemadden42/rockyou2024)
+* [Original C++ port](https://github.com/mikemadden42/rockyou2024) by Mike Madden
