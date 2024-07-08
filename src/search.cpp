@@ -28,7 +28,7 @@ struct FileInfo
 struct SearchResult
 {
     std::string filename;
-    std::vector<std::pair<int, int>> occurrences;
+    std::vector<std::tuple<int, int, std::string>> occurrences;
 };
 
 using ZipIndex = std::map<std::string, FileInfo>;
@@ -95,7 +95,13 @@ ZipIndex create_zip_index(const std::string &filename)
             throw std::runtime_error("Error getting file info");
         }
 
-        index[filename_inzip] = {unzGetOffset(zip_file), file_info.uncompressed_size};
+        uLong file_offset = unzGetOffset(zip_file);
+        if (file_offset == 0)
+        {
+            std::cerr << "Warning: Unable to get offset for file: " << filename_inzip << std::endl;
+        }
+
+        index[filename_inzip] = {file_offset, file_info.uncompressed_size};
 
         if (i + 1 < global_info.number_entry && unzGoToNextFile(zip_file) != UNZ_OK)
         {
@@ -137,7 +143,7 @@ std::vector<size_t> boyer_moore(std::string_view text, std::string_view pattern)
     return results;
 }
 
-SearchResult search_in_file(const std::string &zip_filename, const FileInfo &file_info, const std::string &keyword)
+SearchResult search_in_file(const std::string &zip_filename, const std::string &file_name, const FileInfo &file_info, const std::string &keyword)
 {
     unzFile zip_file = unzOpen(zip_filename.c_str());
     if (!zip_file)
@@ -151,14 +157,26 @@ SearchResult search_in_file(const std::string &zip_filename, const FileInfo &fil
         unzClose(zip_file);
     };
 
-    if (unzSetOffset(zip_file, file_info.offset) != UNZ_OK || unzOpenCurrentFile(zip_file) != UNZ_OK)
+    if (file_info.offset != 0 && unzSetOffset(zip_file, file_info.offset) != UNZ_OK)
+    {
+        std::cerr << "Warning: Unable to set offset for file: " << file_name << ". Trying to locate file by name." << std::endl;
+        if (unzLocateFile(zip_file, file_name.c_str(), 0) != UNZ_OK)
+        {
+            cleanup();
+            throw std::runtime_error("Error locating file in zip: " + file_name);
+        }
+    }
+
+    if (unzOpenCurrentFile(zip_file) != UNZ_OK)
     {
         cleanup();
-        throw std::runtime_error("Error setting offset or opening file in zip");
+        throw std::runtime_error("Error opening file in zip: " + file_name);
     }
 
     SearchResult result;
-    result.filename = zip_filename;
+    result.filename = file_name;
+
+    const int context_size = 20;
 
     if (file_info.size >= MIN_FILE_SIZE_FOR_MMAP)
     {
@@ -174,14 +192,21 @@ SearchResult search_in_file(const std::string &zip_filename, const FileInfo &fil
         int line = 1, col = 1;
         for (size_t pos : positions)
         {
-            while (pos > 0 && content[pos - 1] != '\n')
+            size_t line_start = pos;
+            while (line_start > 0 && content[line_start - 1] != '\n')
             {
-                pos--;
+                line_start--;
                 col++;
             }
-            result.occurrences.emplace_back(line, col);
-            line++;
-            col = 1;
+
+            size_t context_start = (pos > context_size) ? pos - context_size : 0;
+            size_t context_end = std::min(pos + keyword.length() + context_size, content.length());
+            std::string context = std::string(content.substr(context_start, context_end - context_start));
+
+            result.occurrences.emplace_back(line, col, context);
+
+            line += std::count(content.begin() + line_start, content.begin() + pos, '\n');
+            col = pos - line_start + 1;
         }
     }
     else
@@ -199,26 +224,19 @@ SearchResult search_in_file(const std::string &zip_filename, const FileInfo &fil
             auto positions = boyer_moore(search_text, keyword);
             for (size_t pos : positions)
             {
-                size_t line_start = total_read + pos;
+                size_t line_start = pos;
                 while (line_start > 0 && search_text[line_start - 1] != '\n')
                 {
                     line_start--;
                 }
-                result.occurrences.emplace_back(line, pos - line_start + 1);
-                line++;
-            }
 
-            for (char c : chunk)
-            {
-                if (c == '\n')
-                {
-                    line++;
-                    col = 1;
-                }
-                else
-                {
-                    col++;
-                }
+                size_t context_start = (pos > context_size) ? pos - context_size : 0;
+                size_t context_end = std::min(pos + keyword.length() + context_size, search_text.length());
+                std::string context = search_text.substr(context_start, context_end - context_start);
+
+                result.occurrences.emplace_back(line, pos - line_start + 1, context);
+
+                line += std::count(search_text.begin() + line_start, search_text.begin() + pos, '\n');
             }
 
             total_read += bytes_read;
@@ -246,16 +264,21 @@ void search_in_zip(const std::string &filename, const std::string &keyword)
     int i = 0;
     for (const auto &[file_name, file_info] : index)
     {
-        threads.emplace_back([&, i](const std::string &fn, const FileInfo &fi)
+        threads.emplace_back([&, i, file_name](const FileInfo &fi)
                              {
-            results[i] = search_in_file(filename, fi, keyword);
-            total_count += results[i].occurrences.size();
+            try {
+                results[i] = search_in_file(filename, file_name, fi, keyword);
+                total_count += results[i].occurrences.size();
 
-            std::lock_guard<std::mutex> lock(cout_mutex);
-            std::cout << "Occurrences in \"" << fn << "\": " << results[i].occurrences.size() << '\n';
-            for (const auto &[line, col] : results[i].occurrences) {
-                std::cout << "  Line " << line << ", Column " << col << '\n';
-            } }, file_name, file_info);
+                std::lock_guard<std::mutex> lock(cout_mutex);
+                std::cout << "Occurrences in \"" << file_name << "\": " << results[i].occurrences.size() << '\n';
+                for (const auto &[line, col, context] : results[i].occurrences) {
+                    std::cout << "  Line " << line << ", Column " << col << ": " << context << '\n';
+                }
+            } catch (const std::exception& e) {
+                std::lock_guard<std::mutex> lock(cout_mutex);
+                std::cerr << "Error processing file \"" << file_name << "\": " << e.what() << '\n';
+            } }, file_info);
         i++;
     }
 
