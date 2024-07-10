@@ -347,14 +347,14 @@ int main(int argc, char *argv[])
 {
     try
     {
-        PrintHeader();
+        Search::PrintHeader();
 
         std::string keyword;
         std::string filename;
 
         if (argc == 2 && (std::strcmp(argv[1], "--help") == 0))
         {
-            PrintUsage(argv[0]);
+            Search::PrintUsage(argv[0]);
             return 0;
         }
 
@@ -373,7 +373,7 @@ int main(int argc, char *argv[])
         }
         else
         {
-            PrintUsage(argv[0]);
+            Search::PrintUsage(argv[0]);
             return 1;
         }
 
@@ -382,7 +382,7 @@ int main(int argc, char *argv[])
             throw std::runtime_error("File does not exist: " + filename);
         }
 
-        SearchInZip(filename, keyword);
+        Search::SearchInZip(filename, keyword);
     }
     catch (const std::exception &e)
     {
