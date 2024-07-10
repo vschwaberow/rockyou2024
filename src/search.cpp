@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cstring>
 #include <execution>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -14,6 +15,8 @@
 #include <atomic>
 #include <ranges>
 #include <span>
+#include <sys/mman.h>
+#include <unistd.h>
 #include "unzip.h"
 #include "zlib.h"
 
