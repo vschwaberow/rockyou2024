@@ -341,7 +341,7 @@ Based on rockyou2024 cpp by Mike Madden
         std::cout << "Search complete. Total occurrences: " << total_count << '\n';
         std::cout << "Time taken: " << cpu_time_used.count() << " seconds\n";
     }
-} // namespace
+} 
 
 int main(int argc, char *argv[])
 {
