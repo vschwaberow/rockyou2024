@@ -20,7 +20,7 @@
 #include "unzip.h"
 #include "zlib.h"
 
-namespace
+namespace Search
 {
 
     constexpr size_t kChunkSize = 1024 * 1024;               // 1 MB
