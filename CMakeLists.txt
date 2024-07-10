@@ -28,7 +28,7 @@ fetch_if_not_exists(minizip
 
 find_package(TBB REQUIRED)
 
-add_executable(search src/search.cpp)
+add_executable(search src/Search.cc)
 
 target_link_libraries(search PRIVATE minizip TBB::tbb)
 
