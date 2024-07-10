@@ -68,10 +68,11 @@ Based on rockyou2024 cpp by Mike Madden
 
     void PrintUsage(const char *program_name)
     {
-        std::cout << "Usage: " << program_name << " <zip_file> <keyword>\n"
+        std::cout << "Usage: " << program_name << " <zip_file> <keyword> [-i]\n"
                   << "  or:  " << program_name << " --interactive\n\n"
                   << "Options:\n"
                   << "  --interactive    Run in interactive mode\n"
+                  << "  -i               Perform case-insensitive search\n"
                   << "  --help           Display this help message\n";
     }
 
