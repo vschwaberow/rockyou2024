@@ -279,27 +279,54 @@ Based on rockyou2024 cpp by Mike Madden
         std::atomic<int> total_count = 0;
         std::mutex cout_mutex;
 
-        std::vector<std::thread> threads;
-        std::vector<SearchResult> results(index.size());
-        int i = 0;
-        for (const auto &[file_name, file_info] : index)
+        unsigned int num_threads = std::thread::hardware_concurrency();
+        if (num_threads == 0)
         {
-            threads.emplace_back([&, i, file_name](const FileInfo &fi)
-                                 {
-      try {
-        results[i] = SearchInFile(filename, file_name, fi, keyword);
-        total_count += results[i].occurrences.size();
-
-        std::lock_guard<std::mutex> lock(cout_mutex);
-        std::cout << "Occurrences in \"" << file_name << "\": " << results[i].occurrences.size() << '\n';
-        for (const auto& [line, col, context] : results[i].occurrences) {
-          std::cout << "  Line " << line << ", Column " << col << ": " << context << '\n';
+            num_threads = 4; // Default to 4 threads if hardware_concurrency() fails
         }
-      } catch (const std::exception& e) {
-        std::lock_guard<std::mutex> lock(cout_mutex);
-        std::cerr << "Error processing file \"" << file_name << "\": " << e.what() << '\n';
-      } }, file_info);
-            i++;
+
+        std::vector<std::thread> threads;
+        std::vector<SearchResult> results;
+        results.reserve(index.size());
+
+        std::atomic<size_t> next_file_index(0);
+
+        auto worker = [&]()
+        {
+            while (true)
+            {
+                size_t i = next_file_index.fetch_add(1, std::memory_order_relaxed);
+                if (i >= index.size())
+                    break;
+
+                auto it = std::next(index.begin(), i);
+                const auto &[file_name, file_info] = *it;
+
+                try
+                {
+                    SearchResult result = SearchInFile(filename, file_name, file_info, keyword);
+                    total_count += result.occurrences.size();
+
+                    std::lock_guard<std::mutex> lock(cout_mutex);
+                    std::cout << "Occurrences in \"" << file_name << "\": " << result.occurrences.size() << '\n';
+                    for (const auto &[line, col, context] : result.occurrences)
+                    {
+                        std::cout << "  Line " << line << ", Column " << col << ": " << context << '\n';
+                    }
+
+                    results.push_back(std::move(result));
+                }
+                catch (const std::exception &e)
+                {
+                    std::lock_guard<std::mutex> lock(cout_mutex);
+                    std::cerr << "Error processing file \"" << file_name << "\": " << e.what() << '\n';
+                }
+            }
+        };
+
+        for (unsigned int i = 0; i < num_threads; ++i)
+        {
+            threads.emplace_back(worker);
         }
 
         for (auto &thread : threads)
@@ -313,7 +340,6 @@ Based on rockyou2024 cpp by Mike Madden
         std::cout << "Search complete. Total occurrences: " << total_count << '\n';
         std::cout << "Time taken: " << cpu_time_used.count() << " seconds\n";
     }
-
 } // namespace
 
 int main(int argc, char *argv[])
