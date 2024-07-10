@@ -23,6 +23,7 @@
 namespace Search
 {
 
+    bool case_insensitive = false;
     constexpr size_t kChunkSize = 1024 * 1024;               // 1 MB
     constexpr size_t kMinFileSizeForMmap = 10 * 1024 * 1024; // 10 MB
     constexpr int kContextSize = 20;
@@ -341,7 +342,7 @@ Based on rockyou2024 cpp by Mike Madden
         std::cout << "Search complete. Total occurrences: " << total_count << '\n';
         std::cout << "Time taken: " << cpu_time_used.count() << " seconds\n";
     }
-} 
+}
 
 int main(int argc, char *argv[])
 {
@@ -352,12 +353,6 @@ int main(int argc, char *argv[])
         std::string keyword;
         std::string filename;
 
-        if (argc == 2 && (std::strcmp(argv[1], "--help") == 0))
-        {
-            Search::PrintUsage(argv[0]);
-            return 0;
-        }
-
         if (argc == 2 && (std::strcmp(argv[1], "--interactive") == 0))
         {
             std::cout << "Enter the keyword to search: ";
@@ -365,18 +360,26 @@ int main(int argc, char *argv[])
 
             std::cout << "Enter the zip filename to search in: ";
             std::getline(std::cin, filename);
+
+            std::cout << "Case-insensitive search? (y/n): ";
+            std::string response;
+            std::getline(std::cin, response);
+            Search::case_insensitive = (response == "y" || response == "Y");
         }
-        else if (argc == 3)
+        else if (argc >= 3 && argc <= 4)
         {
             filename = argv[1];
             keyword = argv[2];
+            if (argc == 4 && std::strcmp(argv[3], "-i") == 0)
+            {
+                Search::case_insensitive = true;
+            }
         }
         else
         {
             Search::PrintUsage(argv[0]);
             return 1;
         }
-
         if (!std::filesystem::exists(filename))
         {
             throw std::runtime_error("File does not exist: " + filename);
