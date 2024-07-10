@@ -26,9 +26,11 @@ fetch_if_not_exists(minizip
   4.0.7
 )
 
+find_package(TBB REQUIRED)
+
 add_executable(search src/search.cpp)
 
-target_link_libraries(search PRIVATE minizip)
+target_link_libraries(search PRIVATE minizip TBB::tbb)
 
 target_include_directories(search PRIVATE
   ${CMAKE_SOURCE_DIR}/vendor/minizip
