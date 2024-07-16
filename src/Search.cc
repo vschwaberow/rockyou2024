@@ -12,6 +12,12 @@
 #include <string_view>
 #include <thread>
 #include <vector>
+#include <queue>
+#include <unordered_map>
+#include <memory>
+#include <semaphore>
+#include <functional>
+#include <ranges>
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -24,8 +30,8 @@ namespace Search
 {
 
     bool case_insensitive = false;
-    constexpr size_t kChunkSize = 1024 * 1024;               // 1 MB
-    constexpr size_t kMinFileSizeForMmap = 10 * 1024 * 1024; // 10 MB
+    constexpr size_t kChunkSize = 1024 * 1024;
+    constexpr size_t kMinFileSizeForMmap = 10 * 1024 * 1024;
     constexpr int kContextSize = 20;
 
     struct FileInfo
@@ -37,10 +43,169 @@ namespace Search
     struct SearchResult
     {
         std::string filename;
-        std::vector<std::tuple<int, int, std::string>> occurrences;
+        std::vector<std::tuple<std::string, int, int, std::string>> occurrences;
     };
 
     using ZipIndex = std::map<std::string, FileInfo>;
+
+    class ThreadPool
+    {
+    public:
+        ThreadPool(size_t num_threads) : stop_flag(false)
+        {
+            for (size_t i = 0; i < num_threads; ++i)
+            {
+                threads.emplace_back([this]
+                                     { worker_thread(); });
+            }
+        }
+
+        ~ThreadPool()
+        {
+            {
+                std::lock_guard lock(queue_mutex);
+                stop_flag = true;
+            }
+            sem.release(threads.size());
+            for (auto &thread : threads)
+            {
+                thread.join();
+            }
+        }
+
+        template <class F>
+        void enqueue(F &&f)
+        {
+            {
+                std::lock_guard lock(queue_mutex);
+                tasks.emplace(std::forward<F>(f));
+            }
+            sem.release();
+        }
+
+    private:
+        void worker_thread()
+        {
+            while (true)
+            {
+                sem.acquire();
+                std::function<void()> task;
+                {
+                    std::lock_guard lock(queue_mutex);
+                    if (stop_flag && tasks.empty())
+                    {
+                        return;
+                    }
+                    task = std::move(tasks.front());
+                    tasks.pop();
+                }
+                task();
+            }
+        }
+
+        std::vector<std::jthread> threads;
+        std::queue<std::function<void()>> tasks;
+        std::mutex queue_mutex;
+        std::binary_semaphore sem{0};
+        bool stop_flag;
+    };
+
+    class AhoCorasick
+    {
+    private:
+        struct Node
+        {
+            std::unordered_map<char, std::unique_ptr<Node>> children;
+            Node *fail;
+            std::vector<int> output;
+            Node() : fail(nullptr) {}
+        };
+
+        std::unique_ptr<Node> root;
+
+    public:
+        AhoCorasick(const std::vector<std::string> &patterns)
+        {
+            root = std::make_unique<Node>();
+
+            for (int i = 0; i < patterns.size(); ++i)
+            {
+                Node *node = root.get();
+                for (char ch : patterns[i])
+                {
+                    if (!node->children[ch])
+                    {
+                        node->children[ch] = std::make_unique<Node>();
+                    }
+                    node = node->children[ch].get();
+                }
+                node->output.push_back(i);
+            }
+
+            buildFailureLinks();
+        }
+
+        std::vector<std::pair<int, int>> search(const std::string &text)
+        {
+            std::vector<std::pair<int, int>> results;
+            Node *current = root.get();
+
+            for (int i = 0; i < text.length(); ++i)
+            {
+                char ch = text[i];
+                while (current != root.get() && !current->children[ch])
+                {
+                    current = current->fail;
+                }
+
+                if (current->children[ch])
+                {
+                    current = current->children[ch].get();
+                }
+
+                for (int pattern_index : current->output)
+                {
+                    results.emplace_back(pattern_index, i);
+                }
+            }
+
+            return results;
+        }
+
+    private:
+        void buildFailureLinks()
+        {
+            std::queue<Node *> q;
+
+            for (auto &[ch, child] : root->children)
+            {
+                child->fail = root.get();
+                q.push(child.get());
+            }
+
+            while (!q.empty())
+            {
+                Node *node = q.front();
+                q.pop();
+
+                for (auto &[ch, child] : node->children)
+                {
+                    q.push(child.get());
+
+                    Node *fail = node->fail;
+                    while (fail != root.get() && !fail->children[ch])
+                    {
+                        fail = fail->fail;
+                    }
+
+                    child->fail = fail->children[ch] ? fail->children[ch].get() : root.get();
+                    child->output.insert(child->output.end(),
+                                         child->fail->output.begin(),
+                                         child->fail->output.end());
+                }
+            }
+        }
+    };
 
     void PrintHeader()
     {
@@ -56,7 +221,7 @@ Based on rockyou2024 cpp by Mike Madden
 
 )";
 
-        std::cout << "\033[1;34m"; // Set text color to bright blue
+        std::cout << "\033[1;34m";
         for (size_t i = 0; kAsciiArt[i] != '\0'; ++i)
         {
             std::cout << kAsciiArt[i] << std::flush;
@@ -69,7 +234,7 @@ Based on rockyou2024 cpp by Mike Madden
 
     void PrintUsage(const char *program_name)
     {
-        std::cout << "Usage: " << program_name << " <zip_file> <keyword> [-i]\n"
+        std::cout << "Usage: " << program_name << " <zip_file> <keyword1> [<keyword2> ...] [-i]\n"
                   << "  or:  " << program_name << " --interactive\n\n"
                   << "Options:\n"
                   << "  --interactive    Run in interactive mode\n"
@@ -125,271 +290,142 @@ Based on rockyou2024 cpp by Mike Madden
         return index;
     }
 
-    std::vector<size_t> BoyerMoore(std::string_view text, std::string_view pattern)
-    {
-        std::vector<size_t> results;
-        int m = pattern.length();
-        int n = text.length();
-
-        if (m == 0 || n == 0 || m > n)
-            return results;
-
-        std::array<int, 256> bad_char;
-        bad_char.fill(-1);
-
-        for (int i = 0; i < m; i++)
-            bad_char[pattern[i]] = i;
-
-        for (int s = 0; s <= (n - m);)
-        {
-            int j = m - 1;
-            while (j >= 0 && pattern[j] == text[s + j])
-                j--;
-
-            if (j < 0)
-            {
-                results.push_back(s);
-                s += (s + m < n) ? m - bad_char[text[s + m]] : 1;
-            }
-            else
-            {
-                s += std::max(1, j - bad_char[text[s + j]]);
-            }
-        }
-
-        return results;
-    }
-
     SearchResult SearchInFile(const std::string &zip_filename,
                               const std::string &file_name,
                               const FileInfo &file_info,
-                              const std::string &keyword)
+                              const std::vector<std::string> &keywords)
     {
-        unzFile zip_file = unzOpen(zip_filename.c_str());
-        if (!zip_file)
+        int fd = open(zip_filename.c_str(), O_RDONLY);
+        if (fd == -1)
         {
-            throw std::runtime_error("Error opening zip file: " + zip_filename);
+            throw std::runtime_error("Error opening zip file for mmap");
         }
 
-        auto cleanup = [&]()
+        void *mapped = mmap(nullptr, file_info.size, PROT_READ, MAP_PRIVATE, fd, file_info.offset);
+        if (mapped == MAP_FAILED)
         {
-            unzCloseCurrentFile(zip_file);
-            unzClose(zip_file);
-        };
-
-        if (file_info.offset != 0 && unzSetOffset(zip_file, file_info.offset) != UNZ_OK)
-        {
-            std::cerr << "Warning: Unable to set offset for file: " << file_name
-                      << ". Trying to locate file by name." << std::endl;
-            if (unzLocateFile(zip_file, file_name.c_str(), 0) != UNZ_OK)
-            {
-                cleanup();
-                throw std::runtime_error("Error locating file in zip: " + file_name);
-            }
-        }
-
-        if (unzOpenCurrentFile(zip_file) != UNZ_OK)
-        {
-            cleanup();
-            throw std::runtime_error("Error opening file in zip: " + file_name);
+            close(fd);
+            throw std::runtime_error("Error memory mapping file");
         }
 
         SearchResult result;
         result.filename = file_name;
 
-        if (file_info.size >= kMinFileSizeForMmap)
+        AhoCorasick ac(keywords);
+
+        std::string_view content(static_cast<char *>(mapped), file_info.size);
+        auto matches = ac.search(std::string(content));
+
+        for (const auto &[keyword_index, pos] : matches)
         {
-            std::vector<char> buffer(file_info.size);
-            if (unzReadCurrentFile(zip_file, buffer.data(),
-                                   static_cast<unsigned int>(buffer.size())) !=
-                static_cast<int>(file_info.size))
-            {
-                cleanup();
-                throw std::runtime_error("Error reading file content");
-            }
-            std::string_view content(buffer.data(), buffer.size());
-            auto positions = BoyerMoore(content, keyword);
-
+            const auto &keyword = keywords[keyword_index];
             int line = 1, col = 1;
-            for (size_t pos : positions)
+            for (size_t i = 0; i < pos; ++i)
             {
-                size_t line_start = pos;
-                while (line_start > 0 && content[line_start - 1] != '\n')
+                if (content[i] == '\n')
                 {
-                    line_start--;
-                    col++;
+                    ++line;
+                    col = 1;
                 }
-
-                size_t context_start = (pos > kContextSize) ? pos - kContextSize : 0;
-                size_t context_end = std::min(pos + keyword.length() + kContextSize, content.length());
-                std::string context(content.substr(context_start, context_end - context_start));
-
-                result.occurrences.emplace_back(line, col, std::move(context));
-
-                line += std::count(content.begin() + line_start, content.begin() + pos, '\n');
-                col = pos - line_start + 1;
-            }
-        }
-        else
-        {
-            std::vector<char> buffer(kChunkSize);
-            std::string overlap;
-            int bytes_read;
-            size_t total_read = 0;
-            int line = 1, col = 1;
-            while ((bytes_read = unzReadCurrentFile(zip_file, buffer.data(),
-                                                    static_cast<unsigned int>(buffer.size()))) > 0)
-            {
-                std::string_view chunk(buffer.data(), static_cast<size_t>(bytes_read));
-                std::string search_text = overlap + std::string(chunk);
-
-                auto positions = BoyerMoore(search_text, keyword);
-                for (size_t pos : positions)
+                else
                 {
-                    size_t line_start = pos;
-                    while (line_start > 0 && search_text[line_start - 1] != '\n')
-                    {
-                        line_start--;
-                    }
-
-                    size_t context_start = (pos > kContextSize) ? pos - kContextSize : 0;
-                    size_t context_end = std::min(pos + keyword.length() + kContextSize, search_text.length());
-                    std::string context = search_text.substr(context_start, context_end - context_start);
-
-                    result.occurrences.emplace_back(line, pos - line_start + 1, std::move(context));
-
-                    line += std::count(search_text.begin() + line_start, search_text.begin() + pos, '\n');
+                    ++col;
                 }
-
-                total_read += bytes_read;
-                overlap = (search_text.length() >= keyword.length())
-                              ? search_text.substr(search_text.length() - keyword.length() + 1)
-                              : "";
             }
+
+            size_t context_start = (pos > kContextSize) ? pos - kContextSize : 0;
+            size_t context_end = std::min(pos + keyword.length() + kContextSize, content.length());
+            std::string context(content.substr(context_start, context_end - context_start));
+
+            result.occurrences.emplace_back(keyword, line, col, std::move(context));
         }
 
-        cleanup();
+        munmap(mapped, file_info.size);
+        close(fd);
+
         return result;
     }
 
-    void SearchInZip(const std::string &filename, const std::string &keyword)
+    void SearchInZip(const std::string &filename, const std::vector<std::string> &keywords)
     {
-        auto index = CreateZipIndex(filename);
-
-        const auto start_time = std::chrono::high_resolution_clock::now();
-
-        std::atomic<int> total_count = 0;
-        std::mutex cout_mutex;
-
-        unsigned int num_threads = std::thread::hardware_concurrency();
-        if (num_threads == 0)
-        {
-            num_threads = 4; // Default to 4 threads if hardware_concurrency() fails
-        }
-
-        std::vector<std::thread> threads;
+        ZipIndex index = CreateZipIndex(filename);
         std::vector<SearchResult> results;
-        results.reserve(index.size());
+        std::mutex cout_mutex;
+        size_t total_count = 0;
+        std::atomic_ref<size_t> atomic_total_count(total_count);
 
-        std::atomic<size_t> next_file_index(0);
+        ThreadPool pool(std::thread::hardware_concurrency());
 
-        auto worker = [&]()
+        for (const auto &[file_name, file_info] : index)
         {
-            while (true)
-            {
-                size_t i = next_file_index.fetch_add(1, std::memory_order_relaxed);
-                if (i >= index.size())
-                    break;
-
-                auto it = std::next(index.begin(), i);
-                const auto &[file_name, file_info] = *it;
-
-                try
-                {
-                    SearchResult result = SearchInFile(filename, file_name, file_info, keyword);
-                    total_count += result.occurrences.size();
+            pool.enqueue([&, file_name, file_info]
+                         {
+                try {
+                    SearchResult result = SearchInFile(filename, file_name, file_info, keywords);
+                    atomic_total_count.fetch_add(result.occurrences.size(), std::memory_order_relaxed);
 
                     std::lock_guard<std::mutex> lock(cout_mutex);
-                    std::cout << "Occurrences in \"" << file_name << "\": " << result.occurrences.size() << '\n';
-                    for (const auto &[line, col, context] : result.occurrences)
-                    {
-                        std::cout << "  Line " << line << ", Column " << col << ": " << context << '\n';
+                    std::cout << "Occurrences in \"" << file_name << "\":\n";
+                    for (const auto& [keyword, line, col, context] : result.occurrences) {
+                        std::cout << "  Keyword \"" << keyword << "\" at Line " << line << ", Column " << col << ": " << context << '\n';
                     }
 
                     results.push_back(std::move(result));
-                }
-                catch (const std::exception &e)
-                {
+                } catch (const std::exception& e) {
                     std::lock_guard<std::mutex> lock(cout_mutex);
                     std::cerr << "Error processing file \"" << file_name << "\": " << e.what() << '\n';
-                }
-            }
-        };
-
-        for (unsigned int i = 0; i < num_threads; ++i)
-        {
-            threads.emplace_back(worker);
+                } });
         }
 
-        for (auto &thread : threads)
-        {
-            thread.join();
-        }
+        pool.~ThreadPool();
 
-        const auto end_time = std::chrono::high_resolution_clock::now();
-        const std::chrono::duration<double> cpu_time_used = end_time - start_time;
-
-        std::cout << "Search complete. Total occurrences: " << total_count << '\n';
-        std::cout << "Time taken: " << cpu_time_used.count() << " seconds\n";
+        std::cout << "\nSearch completed. Total occurrences found: " << total_count << std::endl;
     }
+
 }
 
 int main(int argc, char *argv[])
 {
-    try
+    Search::PrintHeader();
+
+    if (argc < 3)
     {
-        Search::PrintHeader();
+        Search::PrintUsage(argv[0]);
+        return 1;
+    }
 
-        std::string keyword;
-        std::string filename;
+    std::string zip_filename = argv[1];
+    std::vector<std::string> keywords;
 
-        if (argc == 2 && (std::strcmp(argv[1], "--interactive") == 0))
+    for (int i = 2; i < argc; ++i)
+    {
+        if (std::string(argv[i]) == "-i")
         {
-            std::cout << "Enter the keyword to search: ";
-            std::getline(std::cin, keyword);
-
-            std::cout << "Enter the zip filename to search in: ";
-            std::getline(std::cin, filename);
-
-            std::cout << "Case-insensitive search? (y/n): ";
-            std::string response;
-            std::getline(std::cin, response);
-            Search::case_insensitive = (response == "y" || response == "Y");
-        }
-        else if (argc >= 3 && argc <= 4)
-        {
-            filename = argv[1];
-            keyword = argv[2];
-            if (argc == 4 && std::strcmp(argv[3], "-i") == 0)
-            {
-                Search::case_insensitive = true;
-            }
+            Search::case_insensitive = true;
         }
         else
         {
-            Search::PrintUsage(argv[0]);
-            return 1;
+            keywords.push_back(argv[i]);
         }
-        if (!std::filesystem::exists(filename))
-        {
-            throw std::runtime_error("File does not exist: " + filename);
-        }
+    }
 
-        Search::SearchInZip(filename, keyword);
+    if (Search::case_insensitive)
+    {
+        for (auto &keyword : keywords)
+        {
+            std::ranges::transform(keyword, keyword.begin(),
+                                   [](unsigned char c)
+                                   { return std::tolower(c); });
+        }
+    }
+
+    try
+    {
+        Search::SearchInZip(zip_filename, keywords);
     }
     catch (const std::exception &e)
     {
-        std::cerr << "Error: " << e.what() << '\n';
+        std::cerr << "Error: " << e.what() << std::endl;
         return 1;
     }
 
