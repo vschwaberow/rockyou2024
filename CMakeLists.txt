@@ -28,7 +28,6 @@ fetch_if_not_exists(minizip
   4.0.7
 )
 
-
 add_executable(search src/Search.cc)
 
 target_link_libraries(search PRIVATE minizip)
@@ -55,3 +54,18 @@ set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
 set_target_properties(search PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
+
+include(InstallRequiredSystemLibraries)
+set(CPACK_PACKAGE_VENDOR "Volker Schwaberow")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Rockyou2024 search tool")
+set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
+set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
+set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+
+install(TARGETS search
+  RUNTIME DESTINATION bin
+  COMPONENT applications)
+
+include(CPack)
