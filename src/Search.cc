@@ -13,10 +13,6 @@
 #include <thread>
 #include <vector>
 
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <unistd.h>
-
 #include "unzip.h"
 #include "zlib.h"
 
