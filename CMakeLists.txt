@@ -28,21 +28,10 @@ fetch_if_not_exists(minizip
   4.0.7
 )
 
-set(TBB_STATIC ON CACHE BOOL "Build TBB as a static library" FORCE)
-set(TBB_TEST OFF CACHE BOOL "Enable testing" FORCE)
-set(TBB_EXAMPLES OFF CACHE BOOL "Enable examples" FORCE)
-set(TBB_STRICT OFF CACHE BOOL "Treat compiler warnings as errors" FORCE)
-
-fetch_if_not_exists(tbb
-  https://github.com/oneapi-src/oneTBB.git
-  v2021.13.0 # You can update this to a more recent version if needed
-)
-
-
 
 add_executable(search src/Search.cc)
 
-target_link_libraries(search PRIVATE minizip TBB::tbb)
+target_link_libraries(search PRIVATE minizip)
 
 target_include_directories(search PRIVATE
   ${CMAKE_SOURCE_DIR}/vendor/minizip
@@ -57,7 +46,7 @@ target_compile_options(search PRIVATE
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_link_options(search PRIVATE
-    $<$<CONFIG:Release>:-s> 
+    $<$<CONFIG:Release>:-s>
   )
 endif()
 
