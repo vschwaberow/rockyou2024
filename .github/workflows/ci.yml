@@ -1,142 +1,58 @@
-name: Continuous Integration
+name: CMake Build on Release
 
 on:
-  push:
-    tags:
-      - 'v*' 
+  release:
+    types: [published]
 
 jobs:
-  lint:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-22.04, macos-14]
-    runs-on: ${{ matrix.os }}
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            cmake_generator: "Unix Makefiles"
+          - os: macos-latest
+            cmake_generator: "Unix Makefiles"
+          - os: windows-latest
+            cmake_generator: "Visual Studio 17 2022"
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v3
 
-    - uses: actions/setup-python@v5
-      with: { python-version: "3.12" }
+    - name: Create Build Directory
+      run: cmake -E make_directory ${{github.workspace}}/build
 
-    - name: Install codespell
-      run: pip3 install codespell
-
-    - name: Install clang-format (macOS)
-      if: matrix.os == 'macos-14'
-      run: brew install clang-format
-
-    - name: Lint
-      run: |
-        if [ "${{ matrix.os }}" = "ubuntu-22.04" ]; then
-          cmake -D FORMAT_COMMAND=clang-format-14 -P cmake/lint.cmake
-        else
-          cmake -D FORMAT_COMMAND=clang-format -P cmake/lint.cmake
-        fi
-
-    - name: Spell check
-      if: always()
-      run: cmake -P cmake/spell.cmake
-
-  coverage:
-    needs: [lint]
-
-    runs-on: ubuntu-22.04
-
-    # To enable coverage, delete the last line from the conditional below and
-    # edit the "<name>" placeholder to your GitHub name.
-    # If you do not wish to use codecov, then simply delete this job from the
-    # workflow.
-    if: github.repository_owner == '<name>'
-      && false
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Install LCov
-      run: sudo apt-get update -q
-        && sudo apt-get install lcov -q -y
-      
-    - name: Configure
-      run: cmake --preset=ci-coverage
+    - name: Configure CMake
+      working-directory: ${{github.workspace}}/build
+      run: cmake ${{github.workspace}} -G "${{ matrix.cmake_generator }}" -DCMAKE_BUILD_TYPE=Release
 
     - name: Build
-      run: cmake --build build/coverage -j 2
+      working-directory: ${{github.workspace}}/build
+      run: cmake --build . --config Release
 
     - name: Test
-      working-directory: build/coverage
-      run: ctest --output-on-failure --no-tests=error -j 2
+      working-directory: ${{github.workspace}}/build
+      run: ctest -C Release
 
-    - name: Process coverage info
-      run: cmake --build build/coverage -t coverage
+    - name: Package
+      working-directory: ${{github.workspace}}/build
+      run: cpack -G ZIP -C Release
 
-    - name: Submit to codecov.io
-      uses: codecov/codecov-action@v4
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v3
       with:
-        file: build/coverage/coverage.info
-        token: ${{ secrets.CODECOV_TOKEN }}
+        name: ${{ matrix.os }}-package
+        path: ${{github.workspace}}/build/*.zip
 
-  sanitize:
-    needs: [lint]
-
-    runs-on: ubuntu-22.04
-
-    env: { CXX: clang++-14 }
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Configure
-      run: cmake --preset=ci-sanitize
-
-    - name: Build
-      run: cmake --build build/sanitize -j 2
-
-    - name: Test
-      working-directory: build/sanitize
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
       env:
-        ASAN_OPTIONS: "strict_string_checks=1:\
-          detect_stack_use_after_return=1:\
-          check_initialization_order=1:\
-          strict_init_order=1:\
-          detect_leaks=1:\
-          halt_on_error=1"
-        UBSAN_OPTIONS: "print_stacktrace=1:\
-          halt_on_error=1"
-      run: ctest --output-on-failure --no-tests=error -j 2
-
-  test:
-    needs: [lint]
-
-    strategy:
-      matrix:
-        os: [macos-14, ubuntu-22.04, windows-2022]
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Install static analyzers
-      if: matrix.os == 'ubuntu-22.04'
-      run: >-
-        sudo apt-get install clang-tidy-14 cppcheck -y -q
-
-        sudo update-alternatives --install
-        /usr/bin/clang-tidy clang-tidy
-        /usr/bin/clang-tidy-14 140
-
-    - name: Setup MultiToolTask
-      if: matrix.os == 'windows-2022'
-      run: |
-        Add-Content "$env:GITHUB_ENV" 'UseMultiToolTask=true'
-        Add-Content "$env:GITHUB_ENV" 'EnforceProcessCountAcrossBuilds=true'
-
-    - name: Configure
-      shell: pwsh
-      run: cmake "--preset=ci-$("${{ matrix.os }}".split("-")[0])"
-
-    - name: Build
-      run: cmake --build build --config Release -j 2
-
-    - name: Install
-      run: cmake --install build --config Release --prefix prefix
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ${{github.workspace}}/build/*.zip
+        asset_name: ${{ matrix.os }}-package.zip
+        asset_content_type: application/zip
