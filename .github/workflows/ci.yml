@@ -2,14 +2,15 @@ name: Continuous Integration
 
 on:
   push:
-    branches:
-      - master
     tags:
-      - 'v*'  # This will trigger the workflow for any tag starting with 'v'
+      - 'v*' 
 
 jobs:
   lint:
-    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, macos-14]
+    runs-on: ${{ matrix.os }}
 
     steps:
     - uses: actions/checkout@v4
@@ -20,8 +21,17 @@ jobs:
     - name: Install codespell
       run: pip3 install codespell
 
+    - name: Install clang-format (macOS)
+      if: matrix.os == 'macos-14'
+      run: brew install clang-format
+
     - name: Lint
-      run: cmake -D FORMAT_COMMAND=clang-format-14 -P cmake/lint.cmake
+      run: |
+        if [ "${{ matrix.os }}" = "ubuntu-22.04" ]; then
+          cmake -D FORMAT_COMMAND=clang-format-14 -P cmake/lint.cmake
+        else
+          cmake -D FORMAT_COMMAND=clang-format -P cmake/lint.cmake
+        fi
 
     - name: Spell check
       if: always()
@@ -45,9 +55,6 @@ jobs:
     - name: Install LCov
       run: sudo apt-get update -q
         && sudo apt-get install lcov -q -y
-
-    - name: Install libtbb
-      run: sudo apt-get install libtbb-dev -q -y
       
     - name: Configure
       run: cmake --preset=ci-coverage
