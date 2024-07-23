@@ -46,6 +46,9 @@ jobs:
       run: sudo apt-get update -q
         && sudo apt-get install lcov -q -y
 
+    - name: Install libtbb
+      run: sudo apt-get install libtbb-dev -q -y
+      
     - name: Configure
       run: cmake --preset=ci-coverage
 
