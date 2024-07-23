@@ -50,23 +50,33 @@ jobs:
         name: ${{ matrix.os }}-package
         path: ${{github.workspace}}/build/*.zip
 
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref }}
-        release_name: Release ${{ github.ref }}
-        draft: false
-        prerelease: false
+    - name: List Build Directory
+      run: |
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          Get-ChildItem -Path ${{github.workspace}}/build -Recurse
+        else
+          ls -R ${{github.workspace}}/build
+        fi
+      shell: bash
+
+    - name: Find ZIP file
+      id: find_zip
+      run: |
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          $ZIP_FILE = Get-ChildItem -Path "${{github.workspace}}/build" -Filter *.zip -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          echo "ZIP_FILE=$ZIP_FILE" >> $env:GITHUB_OUTPUT
+        else
+          ZIP_FILE=$(find ${{github.workspace}}/build -name "*.zip" -type f -print -quit)
+          echo "ZIP_FILE=$ZIP_FILE" >> $GITHUB_OUTPUT
+        fi
+      shell: bash
 
     - name: Upload Release Asset
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ${{github.workspace}}/build/*.zip
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ${{ steps.find_zip.outputs.ZIP_FILE }}
         asset_name: ${{ matrix.os }}-package.zip
         asset_content_type: application/zip
