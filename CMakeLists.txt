@@ -48,6 +48,7 @@ target_include_directories(search_core PUBLIC
   ${CMAKE_SOURCE_DIR}/include
   ${CMAKE_SOURCE_DIR}/vendor/minizip
   ${CMAKE_SOURCE_DIR}/vendor/minizip/zlib
+  ${CMAKE_SOURCE_DIR}/vendor/minizip/third_party/zlib
   ${CMAKE_SOURCE_DIR}/vendor/tbb/include
 )
 
