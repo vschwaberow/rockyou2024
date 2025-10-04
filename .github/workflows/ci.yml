@@ -1,6 +1,9 @@
-name: CMake Build on Release
+name: Cross-Platform Build
 
 on:
+  push:
+    branches: [ main ]
+  pull_request:
   release:
     types: [published]
 
@@ -9,74 +12,93 @@ jobs:
     name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
         include:
           - os: ubuntu-latest
-            cmake_generator: "Unix Makefiles"
+            generator: "Unix Makefiles"
+            build_dir: build/linux
+            configure_args: "-DCMAKE_BUILD_TYPE=Release"
+            build_config: ""
+            ctest_config: ""
+            cpack_config: Release
+            artifact_suffix: linux
+            cc: gcc-14
+            cxx: g++-14
           - os: macos-latest
-            cmake_generator: "Unix Makefiles"
+            generator: "Unix Makefiles"
+            build_dir: build/macos
+            configure_args: "-DCMAKE_BUILD_TYPE=Release"
+            build_config: ""
+            ctest_config: ""
+            cpack_config: Release
+            artifact_suffix: macos
+            cc: ""
+            cxx: ""
           - os: windows-latest
-            cmake_generator: "Visual Studio 17 2022"
+            generator: "Visual Studio 17 2022"
+            build_dir: build/windows
+            configure_args: ""
+            build_config: "--config Release"
+            ctest_config: "-C Release"
+            cpack_config: Release
+            artifact_suffix: windows
+            cc: ""
+            cxx: ""
 
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-    - name: Create Build Directory
-      run: cmake -E make_directory ${{github.workspace}}/build
+      - name: Install GCC 14
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install -y g++-14
 
-    - name: Configure CMake
-      working-directory: ${{github.workspace}}/build
-      run: cmake ${{github.workspace}} -G "${{ matrix.cmake_generator }}" -DCMAKE_BUILD_TYPE=Release
+      - name: Configure CMake
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: cmake -S . -B "${{ matrix.build_dir }}" -G "${{ matrix.generator }}" ${{ matrix.configure_args }}
 
-    - name: Build
-      working-directory: ${{github.workspace}}/build
-      run: cmake --build . --config Release
+      - name: Build
+        run: cmake --build "${{ matrix.build_dir }}" ${{ matrix.build_config }}
 
-    - name: Test
-      working-directory: ${{github.workspace}}/build
-      run: ctest -C Release
+      - name: Test
+        run: ctest ${{ matrix.ctest_config }} --test-dir "${{ matrix.build_dir }}"
 
-    - name: Package
-      working-directory: ${{github.workspace}}/build
-      run: cpack -G ZIP -C Release
+      - name: Package
+        working-directory: ${{ matrix.build_dir }}
+        run: cpack -G ZIP -C ${{ matrix.cpack_config }}
 
-    - name: List Build Directory
-      run: ls -R ${{github.workspace}}/build
+      - name: Locate package
+        id: locate-package
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE=$(find "${{ matrix.build_dir }}" -maxdepth 1 -type f -name "*.zip" -print -quit)
+          if [ -z "$PACKAGE" ]; then
+            echo "No package archive found" >&2
+            exit 1
+          fi
+          echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
 
-    - name: Upload Artifacts
-      uses: actions/upload-artifact@v3
-      with:
-        name: ${{ matrix.os }}-package
-        path: ${{github.workspace}}/build/*.zip
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: search-${{ matrix.artifact_suffix }}-${{ github.sha }}
+          path: |
+            ${{ matrix.build_dir }}/bin/**
+            ${{ steps.locate-package.outputs.package }}
 
-    - name: List Build Directory
-      run: |
-        if [ "$RUNNER_OS" == "Windows" ]; then
-          Get-ChildItem -Path ${{github.workspace}}/build -Recurse
-        else
-          ls -R ${{github.workspace}}/build
-        fi
-      shell: bash
-
-    - name: Find ZIP file
-      id: find_zip
-      run: |
-        if [ "$RUNNER_OS" == "Windows" ]; then
-          $ZIP_FILE = Get-ChildItem -Path "${{github.workspace}}/build" -Filter *.zip -Recurse | Select-Object -First 1 -ExpandProperty FullName
-          echo "ZIP_FILE=$ZIP_FILE" >> $env:GITHUB_OUTPUT
-        else
-          ZIP_FILE=$(find ${{github.workspace}}/build -name "*.zip" -type f -print -quit)
-          echo "ZIP_FILE=$ZIP_FILE" >> $GITHUB_OUTPUT
-        fi
-      shell: bash
-
-    - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ github.event.release.upload_url }}
-        asset_path: ${{ steps.find_zip.outputs.ZIP_FILE }}
-        asset_name: ${{ matrix.os }}-package.zip
-        asset_content_type: application/zip
+      - name: Upload release asset
+        if: github.event_name == 'release'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ${{ steps.locate-package.outputs.package }}
+          asset_name: search-${{ matrix.artifact_suffix }}-${{ github.ref_name }}.zip
+          asset_content_type: application/zip
