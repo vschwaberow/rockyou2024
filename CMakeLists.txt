@@ -89,6 +89,17 @@ target_precompile_headers(search_tests PRIVATE include/rockyou/pch.h)
 
 target_compile_definitions(search_tests PRIVATE TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data")
 
+if(WIN32)
+  add_custom_command(TARGET search_tests POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_BINARY_DIR}/_deps/zlib-build/$<CONFIG>/zlib-ng2.dll"
+            $<TARGET_FILE_DIR:search_tests>)
+  add_custom_command(TARGET search POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_BINARY_DIR}/_deps/zlib-build/$<CONFIG>/zlib-ng2.dll"
+            $<TARGET_FILE_DIR:search>)
+endif()
+
 add_test(NAME search_tests COMMAND search_tests)
 
 include(InstallRequiredSystemLibraries)
