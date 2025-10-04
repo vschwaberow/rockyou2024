@@ -82,14 +82,14 @@ StatusOr<ZipIndex> BuildZipIndex(const std::string& path) {
     return Status::Error(std::string(kZipFirstFileError));
   }
   ZipIndex index;
-  for (uLong i = 0; i < global_info.number_entry; ++i) {
+  for (std::uint64_t i = 0; i < global_info.number_entry; ++i) {
     char filename_inzip[256];
     unz_file_info file_info;
     if (unzGetCurrentFileInfo(zip.get(), &file_info, filename_inzip,
                               sizeof(filename_inzip), nullptr, 0, nullptr, 0) != UNZ_OK) {
       return Status::Error(std::string(kZipFileInfoError));
     }
-    uLong file_offset = unzGetOffset(zip.get());
+    std::uint64_t file_offset = unzGetOffset(zip.get());
     if (file_offset == 0) {
       std::println(stderr, kZipOffsetWarning, filename_inzip);
     }
@@ -160,7 +160,7 @@ Status ZipEntryStream::OpenEntry(const std::string& name, const ZipIndexEntry& e
     return Status::Error(std::string(kZipInvalidHandle));
   }
   if (entry.offset != 0) {
-    if (unzSetOffset(handle_, static_cast<uLong>(entry.offset)) != UNZ_OK) {
+    if (unzSetOffset(handle_, static_cast<std::uint64_t>(entry.offset)) != UNZ_OK) {
       if (unzLocateFile(handle_, name.c_str(), 0) != UNZ_OK) {
         return Status::Error(std::string(kZipLocateError) + name);
       }

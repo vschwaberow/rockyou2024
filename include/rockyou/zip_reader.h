@@ -11,7 +11,6 @@
 
 #include "rockyou/status.h"
 #include "unzip.h"
-#include "zlib.h"
 
 namespace rockyou {
 
