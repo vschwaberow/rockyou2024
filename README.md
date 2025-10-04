@@ -51,3 +51,7 @@ See [`CHANGELOG.md`](CHANGELOG.md) for what changed in each version.
 
 ---
 Version 0.2.0 · MIT licensed · Built by Volker Schwaberow <volker@schwaberow.de>
+
+## Acknowledgements
+
+Original C++ port by Mike Madden (https://github.com/mikemadden42/rockyou2024)
