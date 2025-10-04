@@ -20,7 +20,6 @@
 #include <map>
 #include <mutex>
 #include <optional>
-#include <print>
 #include <span>
 #include <string>
 #include <string_view>
@@ -28,6 +27,7 @@
 #include <thread>
 #include <tuple>
 #include <utility>
+#include "rockyou/print_compat.h"
 #include <vector>
 
 #include "rockyou/messages.h"
