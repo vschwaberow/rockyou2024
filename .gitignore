@@ -33,6 +33,9 @@
 
 # cmake artifacts
 build/
+bin/
+out/
+obj/
 
 # clion artifacts
 .idea/
@@ -47,3 +50,11 @@ rockyou2024.zip
 settings.json
 
 .vscode
+
+# Common local files
+.DS_Store
+Thumbs.db
+*.log
+.env*
+*.tmp
+*.swp
