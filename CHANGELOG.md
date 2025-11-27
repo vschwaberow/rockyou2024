@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [0.3.0] - 2025-11-27
 - Add quiet/JSON output modes with sorting/limits and highlightable context
 - Expose performance flags (threads/chunk/context) and integrity verification (SHA-256 or BLAKE3)
 - Tolerate corrupt ZIP entries while reporting partial failures; interactive mode allows repeated searches

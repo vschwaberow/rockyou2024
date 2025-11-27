@@ -12,16 +12,16 @@ Prebuilt archives ship with each GitHub release. Download the one that matches y
 
 ### Linux / macOS
 ```bash
-download_url=https://github.com/vschwaberow/rockyou2024/releases/download/v0.2.0/search-linux-v0.2.0.zip
+download_url=https://github.com/vschwaberow/rockyou2024/releases/download/v0.3.0/search-linux-v0.3.0.zip
 curl -LO "$download_url"
-unzip search-linux-v0.2.0.zip -d rockyou2024-linux
+unzip search-linux-v0.3.0.zip -d rockyou2024-linux
 ```
-Replace the URL with the macOS package when needed (`https://github.com/vschwaberow/rockyou2024/releases/download/v0.2.0/search-macos-v0.2.0.zip`).
+Replace the URL with the macOS package when needed (`https://github.com/vschwaberow/rockyou2024/releases/download/v0.3.0/search-macos-v0.3.0.zip`).
 
 ### Windows
 ```powershell
-Invoke-WebRequest -Uri https://github.com/vschwaberow/rockyou2024/releases/download/v0.2.0/search-windows-v0.2.0.zip -OutFile search-windows-v0.2.0.zip
-Expand-Archive -Path search-windows-v0.2.0.zip -DestinationPath rockyou2024-windows
+Invoke-WebRequest -Uri https://github.com/vschwaberow/rockyou2024/releases/download/v0.3.0/search-windows-v0.3.0.zip -OutFile search-windows-v0.3.0.zip
+Expand-Archive -Path search-windows-v0.3.0.zip -DestinationPath rockyou2024-windows
 ```
 
 ## Usage
@@ -50,7 +50,7 @@ ctest --test-dir build
 See [`CHANGELOG.md`](CHANGELOG.md) for what changed in each version.
 
 ---
-Version 0.2.0 · MIT licensed · Built by Volker Schwaberow <volker@schwaberow.de>
+Version 0.3.0 · MIT licensed · Built by Volker Schwaberow <volker@schwaberow.de>
 
 ## Acknowledgements
 
