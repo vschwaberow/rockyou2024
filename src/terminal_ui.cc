@@ -34,6 +34,15 @@ void PrintUsage(const std::string& program_name) {
   std::println(rockyou::kUsageOptionsHeader);
   std::println(rockyou::kUsageInteractiveOption);
   std::println(rockyou::kUsageCaseInsensitiveOption);
+  std::println(rockyou::kUsageQuietOption);
+  std::println(rockyou::kUsageJsonOption);
+  std::println(rockyou::kUsageLimitOption);
+  std::println(rockyou::kUsagePerFileLimitOption);
+  std::println(rockyou::kUsageThreadsOption);
+  std::println(rockyou::kUsageChunkOption);
+  std::println(rockyou::kUsageContextOption);
+  std::println(rockyou::kUsageChecksumOption);
+  std::println(rockyou::kUsageHighlightOption);
   std::println(rockyou::kUsageHelpOption);
 }
 

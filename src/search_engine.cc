@@ -6,19 +6,23 @@
 #include "rockyou/search_engine.h"
 
 #include "rockyou/zip_reader.h"
+#include <openssl/sha.h>
+#include "blake3.h"
 
 namespace rockyou {
 namespace {
 
-constexpr size_t kChunkSize = 1024 * 1024;
-constexpr size_t kMinFileSizeForBuffer = 10 * 1024 * 1024;
-constexpr int kContextSize = 20;
+constexpr size_t kDefaultChunkSize = 1024 * 1024;
+constexpr size_t kDefaultMinFileSizeForBuffer = 10 * 1024 * 1024;
+constexpr int kDefaultContextSize = 20;
 
 using Occurrence = std::tuple<int, int, std::string>;
 
 struct SearchResult {
   std::string filename;
   std::vector<Occurrence> occurrences;
+  bool truncated = false;
+  std::string error;
 };
 
 void LowerInPlace(std::string* value) {
@@ -90,13 +94,291 @@ std::pair<int, int> ComputeLineColumn(const std::vector<size_t>& newline_offsets
 
 std::string BuildContext(std::string_view source,
                          size_t match_offset,
-                         size_t keyword_length) {
-  const size_t start = match_offset > static_cast<size_t>(kContextSize)
-                           ? match_offset - static_cast<size_t>(kContextSize)
-                           : 0;
-  const size_t end = std::min(match_offset + keyword_length + static_cast<size_t>(kContextSize),
+                         size_t keyword_length,
+                         size_t context_size) {
+  const size_t start = match_offset > context_size ? match_offset - context_size : 0;
+  const size_t end = std::min(match_offset + keyword_length + context_size,
                               source.size());
   return std::string(source.substr(start, end - start));
+}
+
+std::string BuildHighlightedContext(std::string_view source,
+                                    size_t match_offset,
+                                    size_t keyword_length,
+                                    size_t context_size,
+                                    bool highlight) {
+  std::string context = BuildContext(source, match_offset, keyword_length, context_size);
+  if (!highlight) {
+    return context;
+  }
+  const size_t start = match_offset > context_size ? match_offset - context_size : 0;
+  const size_t relative = match_offset - start;
+  if (relative > context.size()) {
+    return context;
+  }
+  const size_t highlight_end = std::min(relative + keyword_length, context.size());
+  context.insert(highlight_end, "]");
+  context.insert(relative, "[");
+  return context;
+}
+
+std::string EscapeJson(std::string_view input) {
+  std::string escaped;
+  escaped.reserve(input.size() + 8);
+  for (char c : input) {
+    switch (c) {
+      case '"':
+        escaped.append("\\\"");
+        break;
+      case '\\':
+        escaped.append("\\\\");
+        break;
+      case '\b':
+        escaped.append("\\b");
+        break;
+      case '\f':
+        escaped.append("\\f");
+        break;
+      case '\n':
+        escaped.append("\\n");
+        break;
+      case '\r':
+        escaped.append("\\r");
+        break;
+      case '\t':
+        escaped.append("\\t");
+        break;
+      default:
+        escaped.push_back(c);
+        break;
+    }
+  }
+  return escaped;
+}
+
+std::string BuildJson(const std::vector<SearchResult>& results,
+                      int total_occurrences,
+                      bool truncated,
+                      const std::vector<std::string>& errors,
+                      const SearchOptions& options,
+                      bool partial_failure) {
+  std::string json;
+  json.append("{\"total\":");
+  json.append(std::to_string(total_occurrences));
+  json.append(",\"truncated\":");
+  json.append(truncated ? "true" : "false");
+  json.append(",\"partial_failure\":");
+  json.append(partial_failure ? "true" : "false");
+  json.append(",\"params\":{");
+  json.append("\"case_insensitive\":");
+  json.append(options.case_insensitive ? "true" : "false");
+  json.append(",\"quiet\":");
+  json.append(options.quiet ? "true" : "false");
+  json.append(",\"limit\":");
+  if (options.limit.has_value()) {
+    json.append(std::to_string(options.limit.value()));
+  } else {
+    json.append("null");
+  }
+  json.append(",\"per_file_limit\":");
+  if (options.per_file_limit.has_value()) {
+    json.append(std::to_string(options.per_file_limit.value()));
+  } else {
+    json.append("null");
+  }
+  json.append(",\"threads\":");
+  if (options.thread_count.has_value()) {
+    json.append(std::to_string(options.thread_count.value()));
+  } else {
+    json.append("null");
+  }
+  json.append(",\"chunk\":");
+  if (options.chunk_size.has_value()) {
+    json.append(std::to_string(options.chunk_size.value()));
+  } else {
+    json.append("null");
+  }
+  json.append(",\"context\":");
+  if (options.context_size.has_value()) {
+    json.append(std::to_string(options.context_size.value()));
+  } else {
+    json.append("null");
+  }
+  json.append("},\"results\":[");
+  for (size_t i = 0; i < results.size(); ++i) {
+    const auto& r = results[i];
+    json.append("{\"file\":\"");
+    json.append(EscapeJson(r.filename));
+    json.append("\",\"count\":");
+    json.append(std::to_string(r.occurrences.size()));
+    json.append(",\"truncated\":");
+    json.append(r.truncated ? "true" : "false");
+    json.append(",\"occurrences\":[");
+    for (size_t j = 0; j < r.occurrences.size(); ++j) {
+      const auto& occ = r.occurrences[j];
+      json.append("{\"line\":");
+      json.append(std::to_string(std::get<0>(occ)));
+      json.append(",\"column\":");
+      json.append(std::to_string(std::get<1>(occ)));
+      json.append(",\"context\":\"");
+      json.append(EscapeJson(std::get<2>(occ)));
+      json.append("\"}");
+      if (j + 1 < r.occurrences.size()) {
+        json.push_back(',');
+      }
+    }
+    json.append("}");
+    if (!r.error.empty()) {
+      json.append(",\"error\":\"");
+      json.append(EscapeJson(r.error));
+      json.append("\"");
+    }
+    json.append("}");
+    if (i + 1 < results.size()) {
+      json.push_back(',');
+    }
+  }
+  json.append("],\"errors\":[");
+  for (size_t i = 0; i < errors.size(); ++i) {
+    json.append("\"");
+    json.append(EscapeJson(errors[i]));
+    json.append("\"");
+    if (i + 1 < errors.size()) {
+      json.push_back(',');
+    }
+  }
+  json.append("]}");
+  return json;
+}
+
+enum class ChecksumAlgorithm {
+  kSha256,
+  kBlake3,
+  kUnknown,
+};
+
+struct ChecksumExpectation {
+  ChecksumAlgorithm algorithm = ChecksumAlgorithm::kUnknown;
+  std::string hex;
+};
+
+std::optional<ChecksumExpectation> ParseChecksumExpectation(const std::optional<std::string>& checksum) {
+  if (!checksum.has_value() || checksum->empty()) {
+    return std::nullopt;
+  }
+  ChecksumExpectation expectation;
+  const std::string& value = *checksum;
+  const auto pos = value.find(':');
+  if (pos != std::string::npos) {
+    const std::string prefix = value.substr(0, pos);
+    const std::string remainder = value.substr(pos + 1);
+    if (prefix == "sha256") {
+      expectation.algorithm = ChecksumAlgorithm::kSha256;
+    } else if (prefix == "blake3") {
+      expectation.algorithm = ChecksumAlgorithm::kBlake3;
+    }
+    expectation.hex = remainder;
+  } else {
+    expectation.algorithm = ChecksumAlgorithm::kUnknown;
+    expectation.hex = value;
+  }
+  return expectation;
+}
+
+StatusOr<std::string> ComputeSha256Hex(const std::string& path) {
+  std::ifstream file(path, std::ios::binary);
+  if (!file) {
+    return Status::Error(std::string(kZipOpenError) + path);
+  }
+  SHA256_CTX ctx;
+  if (SHA256_Init(&ctx) != 1) {
+    return Status::Error(std::string(kChecksumMismatchError));
+  }
+  std::array<unsigned char, 8192> buffer{};
+  while (file.good()) {
+    file.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(buffer.size()));
+    const std::streamsize read_bytes = file.gcount();
+    if (read_bytes > 0) {
+      if (SHA256_Update(&ctx, buffer.data(), static_cast<size_t>(read_bytes)) != 1) {
+        return Status::Error(std::string(kChecksumMismatchError));
+      }
+    }
+  }
+  std::array<unsigned char, SHA256_DIGEST_LENGTH> digest{};
+  if (SHA256_Final(digest.data(), &ctx) != 1) {
+    return Status::Error(std::string(kChecksumMismatchError));
+  }
+  static constexpr char kHexDigits[] = "0123456789abcdef";
+  std::string hex;
+  hex.reserve(SHA256_DIGEST_LENGTH * 2);
+  for (unsigned char byte : digest) {
+    hex.push_back(kHexDigits[(byte >> 4) & 0x0F]);
+    hex.push_back(kHexDigits[byte & 0x0F]);
+  }
+  return hex;
+}
+
+StatusOr<std::string> ComputeBlake3Hex(const std::string& path) {
+  std::ifstream file(path, std::ios::binary);
+  if (!file) {
+    return Status::Error(std::string(kZipOpenError) + path);
+  }
+  blake3_hasher hasher;
+  blake3_hasher_init(&hasher);
+  std::array<unsigned char, 8192> buffer{};
+  while (file.good()) {
+    file.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(buffer.size()));
+    const std::streamsize read_bytes = file.gcount();
+    if (read_bytes > 0) {
+      blake3_hasher_update(&hasher, buffer.data(), static_cast<size_t>(read_bytes));
+    }
+  }
+  std::array<unsigned char, BLAKE3_OUT_LEN> out{};
+  blake3_hasher_finalize(&hasher, out.data(), out.size());
+  static constexpr char kHexDigits[] = "0123456789abcdef";
+  std::string hex;
+  hex.reserve(BLAKE3_OUT_LEN * 2);
+  for (unsigned char byte : out) {
+    hex.push_back(kHexDigits[(byte >> 4) & 0x0F]);
+    hex.push_back(kHexDigits[byte & 0x0F]);
+  }
+  return hex;
+}
+
+Status ValidateChecksum(const std::string& path, const std::optional<std::string>& checksum) {
+  auto expectation = ParseChecksumExpectation(checksum);
+  if (!expectation.has_value()) {
+    return Status::Ok();
+  }
+  const auto compare_hex = [&](ChecksumAlgorithm algo, const std::string& expected_hex) -> Status {
+    if (algo == ChecksumAlgorithm::kSha256) {
+      auto hex_or = ComputeSha256Hex(path);
+      if (!hex_or.ok()) {
+        return hex_or.status();
+      }
+      return hex_or.value() == expected_hex ? Status::Ok()
+                                            : Status::Error(std::string(kChecksumMismatchError));
+    }
+    if (algo == ChecksumAlgorithm::kBlake3) {
+      auto hex_or = ComputeBlake3Hex(path);
+      if (!hex_or.ok()) {
+        return hex_or.status();
+      }
+      return hex_or.value() == expected_hex ? Status::Ok()
+                                            : Status::Error(std::string(kChecksumMismatchError));
+    }
+    // Unknown: try both
+    auto hex_sha = ComputeSha256Hex(path);
+    if (hex_sha.ok() && hex_sha.value() == expected_hex) {
+      return Status::Ok();
+    }
+    auto hex_blake = ComputeBlake3Hex(path);
+    if (hex_blake.ok() && hex_blake.value() == expected_hex) {
+      return Status::Ok();
+    }
+    return Status::Error(std::string(kChecksumMismatchError));
+  };
+  return compare_hex(expectation->algorithm, expectation->hex);
 }
 
 StatusOr<SearchResult> SearchFile(const std::string& path,
@@ -104,7 +386,12 @@ StatusOr<SearchResult> SearchFile(const std::string& path,
                                   const ZipIndexEntry& entry,
                                   const std::string& keyword,
                                   const std::string& pattern,
-                                  bool case_insensitive) {
+                                  bool case_insensitive,
+                                  size_t chunk_size,
+                                  size_t context_size,
+                                  size_t min_buffer_size,
+                                  std::optional<int> per_file_limit,
+                                  bool highlight) {
   auto stream_or = ZipEntryStream::Create(path, name, entry);
   if (!stream_or.ok()) {
     return stream_or.status();
@@ -116,7 +403,7 @@ StatusOr<SearchResult> SearchFile(const std::string& path,
     return result;
   }
   const size_t keyword_length = keyword.size();
-  if (entry.size >= kMinFileSizeForBuffer) {
+  if (entry.size >= min_buffer_size) {
     std::string buffer(entry.size, '\0');
     size_t total = 0;
     while (total < buffer.size()) {
@@ -138,13 +425,19 @@ StatusOr<SearchResult> SearchFile(const std::string& path,
     const auto positions = SearchPositions(buffer, pattern, case_insensitive);
     for (size_t pos : positions) {
       const auto line_column = ComputeLineColumn(newline_offsets, pos);
-      const std::string context = BuildContext(buffer, pos, keyword_length);
+      const std::string context =
+          BuildHighlightedContext(buffer, pos, keyword_length, context_size, highlight);
       result.occurrences.emplace_back(line_column.first, line_column.second, context);
+      if (per_file_limit.has_value() &&
+          static_cast<int>(result.occurrences.size()) >= per_file_limit.value()) {
+        result.truncated = true;
+        break;
+      }
     }
     return result;
   }
   std::vector<size_t> newline_offsets;
-  std::vector<char> buffer(kChunkSize);
+  std::vector<char> buffer(chunk_size);
   std::string overlap;
   size_t processed = 0;
   while (true) {
@@ -169,8 +462,14 @@ StatusOr<SearchResult> SearchFile(const std::string& path,
         continue;
       }
       const auto line_column = ComputeLineColumn(newline_offsets, absolute);
-      const std::string context = BuildContext(search_text, pos, keyword_length);
+      const std::string context =
+          BuildHighlightedContext(search_text, pos, keyword_length, context_size, highlight);
       result.occurrences.emplace_back(line_column.first, line_column.second, context);
+      if (per_file_limit.has_value() &&
+          static_cast<int>(result.occurrences.size()) >= per_file_limit.value()) {
+        result.truncated = true;
+        break;
+      }
     }
     processed += static_cast<size_t>(read_bytes);
     if (keyword_length <= 1) {
@@ -184,6 +483,10 @@ StatusOr<SearchResult> SearchFile(const std::string& path,
       }
     }
   }
+  Status close_status = stream.CloseWithStatus();
+  if (!close_status.ok()) {
+    return close_status;
+  }
   return result;
 }
 
@@ -194,6 +497,28 @@ Status SearchZip(const std::string& path,
                  const SearchOptions& options) {
   if (keyword.empty()) {
     return Status::Error(std::string(kKeywordEmptyError));
+  }
+  if (options.limit.has_value() && options.limit.value() <= 0) {
+    return Status::Error(std::string(kInvalidLimitError));
+  }
+  if (options.per_file_limit.has_value() && options.per_file_limit.value() <= 0) {
+    return Status::Error(std::string(kInvalidLimitError));
+  }
+  if (options.thread_count.has_value() && options.thread_count.value() == 0) {
+    return Status::Error(std::string(kInvalidThreadCountError));
+  }
+  if (options.chunk_size.has_value() && options.chunk_size.value() == 0) {
+    return Status::Error(std::string(kInvalidChunkSizeError));
+  }
+  if (options.context_size.has_value() && options.context_size.value() == 0) {
+    return Status::Error(std::string(kInvalidContextSizeError));
+  }
+  const size_t chunk_size = options.chunk_size.value_or(kDefaultChunkSize);
+  const size_t min_buffer_size = kDefaultMinFileSizeForBuffer;
+  const size_t context_size = options.context_size.value_or(static_cast<size_t>(kDefaultContextSize));
+  auto checksum_status = ValidateChecksum(path, options.checksum);
+  if (!checksum_status.ok()) {
+    return checksum_status;
   }
   auto index_or = BuildZipIndex(path);
   if (!index_or.ok()) {
@@ -219,7 +544,7 @@ Status SearchZip(const std::string& path,
     LowerInPlace(&pattern);
   }
   const auto start_time = std::chrono::high_resolution_clock::now();
-  unsigned int thread_count = std::thread::hardware_concurrency();
+  unsigned int thread_count = options.thread_count.value_or(std::thread::hardware_concurrency());
   if (thread_count == 0) {
     thread_count = 4;
   }
@@ -238,10 +563,19 @@ Status SearchZip(const std::string& path,
                                     entry.second,
                                     keyword,
                                     pattern,
-                                    options.case_insensitive);
+                                    options.case_insensitive,
+                                    chunk_size,
+                                    context_size,
+                                    min_buffer_size,
+                                    options.per_file_limit,
+                                    options.highlight);
         if (!result_or.ok()) {
           std::lock_guard<std::mutex> lock(errors_mutex);
           errors.push_back(std::format(kErrorProcessingFormat, entry.first, result_or.status().message()));
+          SearchResult failed;
+          failed.filename = entry.first;
+          failed.error = result_or.status().message();
+          results[index_value] = std::move(failed);
           continue;
         }
         SearchResult result = result_or.TakeValue();
@@ -255,32 +589,119 @@ Status SearchZip(const std::string& path,
   }
   const auto end_time = std::chrono::high_resolution_clock::now();
   const std::chrono::duration<double> elapsed = end_time - start_time;
-  for (size_t i = 0; i < results.size(); ++i) {
-    if (!results[i].has_value()) {
+
+  std::vector<SearchResult> finalized;
+  finalized.reserve(results.size());
+  int total_occurrences = 0;
+  for (const auto& result : results) {
+    if (!result.has_value()) {
       continue;
     }
-    const auto& result = results[i].value();
-    std::println(kOccurrencesFormat, result.filename, result.occurrences.size());
-    for (const auto& occurrence : result.occurrences) {
-      const int line = std::get<0>(occurrence);
-      const int column = std::get<1>(occurrence);
-      const std::string& context = std::get<2>(occurrence);
-      std::println(kOccurrenceDetailFormat, line, column, context);
+    total_occurrences += static_cast<int>(result->occurrences.size());
+    finalized.push_back(result.value());
+  }
+
+  for (auto& result : finalized) {
+    std::sort(result.occurrences.begin(),
+              result.occurrences.end(),
+              [](const Occurrence& a, const Occurrence& b) {
+                if (std::get<0>(a) != std::get<0>(b)) {
+                  return std::get<0>(a) < std::get<0>(b);
+                }
+                if (std::get<1>(a) != std::get<1>(b)) {
+                  return std::get<1>(a) < std::get<1>(b);
+                }
+                return std::get<2>(a) < std::get<2>(b);
+              });
+  }
+
+  std::sort(finalized.begin(), finalized.end(), [](const SearchResult& a, const SearchResult& b) {
+    return a.filename < b.filename;
+  });
+
+  const size_t limit_value =
+      options.limit.has_value() ? static_cast<size_t>(options.limit.value()) : std::numeric_limits<size_t>::max();
+  bool truncated_global = false;
+  size_t remaining = limit_value;
+  int total_after_limit = 0;
+  for (auto& result : finalized) {
+    if (remaining == 0) {
+      if (!result.occurrences.empty()) {
+        result.occurrences.clear();
+        result.truncated = true;
+        truncated_global = true;
+      }
+      continue;
+    }
+    const size_t count = result.occurrences.size();
+    if (count > remaining) {
+      result.occurrences.resize(remaining);
+      result.truncated = true;
+      truncated_global = true;
+    }
+    remaining = (count > remaining) ? 0 : remaining - count;
+    total_after_limit += static_cast<int>(result.occurrences.size());
+  }
+  if (!options.limit.has_value()) {
+    total_after_limit = total_occurrences;
+  }
+
+  auto build_combined_errors = [&errors]() -> std::string {
+    std::string combined;
+    for (size_t i = 0; i < errors.size(); ++i) {
+      if (i != 0) {
+        combined.append("\n");
+      }
+      combined.append(errors[i]);
+    }
+    return combined;
+  };
+
+  const bool partial_failure = !errors.empty();
+
+  if (options.json) {
+    std::string json_output =
+        BuildJson(finalized, total_after_limit, truncated_global, errors, options, partial_failure);
+    if (json_output.empty()) {
+      return Status::Error(std::string(kJsonSerializationError));
+    }
+    std::println("{}", json_output);
+  } else if (options.quiet) {
+    for (const auto& result : finalized) {
+      for (const auto& occurrence : result.occurrences) {
+        const int line = std::get<0>(occurrence);
+        const int column = std::get<1>(occurrence);
+        const std::string& context = std::get<2>(occurrence);
+        std::println("{}:{}:{}:{}", result.filename, line, column, context);
+      }
+    }
+    if (truncated_global) {
+      std::println("{}", kResultsTruncatedMessage);
+    }
+  } else {
+    for (const auto& result : finalized) {
+      std::println(kOccurrencesFormat, result.filename, result.occurrences.size());
+      if (result.truncated) {
+        std::println("  {}", kResultsTruncatedMessage);
+      }
+      for (const auto& occurrence : result.occurrences) {
+        const int line = std::get<0>(occurrence);
+        const int column = std::get<1>(occurrence);
+        const std::string& context = std::get<2>(occurrence);
+        std::println(kOccurrenceDetailFormat, line, column, context);
+      }
+    }
+    std::println(kSearchCompleteFormat, total_after_limit);
+    std::println(kTimeTakenFormat, elapsed.count());
+    if (truncated_global) {
+      std::println("{}", kResultsTruncatedMessage);
     }
   }
-  std::println(kSearchCompleteFormat, total_count.load(std::memory_order_relaxed));
-  std::println(kTimeTakenFormat, elapsed.count());
+
   if (errors.empty()) {
     return Status::Ok();
   }
-  std::string combined;
-  for (size_t i = 0; i < errors.size(); ++i) {
-    if (i != 0) {
-      combined.append("\n");
-    }
-    combined.append(errors[i]);
-  }
-  return Status::Error(combined);
+  return Status::Error(build_combined_errors());
 }
 
 }

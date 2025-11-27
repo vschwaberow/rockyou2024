@@ -36,6 +36,7 @@ class ZipEntryStream {
                                          const ZipIndexEntry& entry);
 
   StatusOr<int> Read(char* buffer, unsigned int length);
+  Status CloseWithStatus();
   size_t size() const;
 
  private:

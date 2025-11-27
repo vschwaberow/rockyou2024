@@ -27,13 +27,13 @@ Expand-Archive -Path search-windows-v0.2.0.zip -DestinationPath rockyou2024-wind
 ## Usage
 From the extracted folder:
 ```bash
-./search <zip_file> <keyword> [-i]
+./search <zip_file> <keyword> [-i] [--quiet|--json] [--limit N] [--per-file-limit N] [--threads N] [--chunk BYTES] [--context CHARS] [--checksum sha256:HEX|blake3:HEX] [--highlight]
 ./search --interactive
 ```
 PowerShell is similar:
 ```powershell
 .
-search.exe <zip_file> <keyword> [-i]
+search.exe <zip_file> <keyword> [-i] [--quiet|--json] [--limit N] [--per-file-limit N] [--threads N] [--chunk BYTES] [--context CHARS] [--checksum sha256:HEX|blake3:HEX] [--highlight]
 .
 search.exe --interactive
 ```

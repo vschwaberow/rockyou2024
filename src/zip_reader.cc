@@ -199,4 +199,16 @@ size_t ZipEntryStream::size() const {
   return size_;
 }
 
+Status ZipEntryStream::CloseWithStatus() {
+  if (!entry_open_) {
+    return Status::Ok();
+  }
+  const int result = unzCloseCurrentFile(handle_);
+  entry_open_ = false;
+  if (result != UNZ_OK) {
+    return Status::Error(std::string(kZipReadError));
+  }
+  return Status::Ok();
+}
+
 }
