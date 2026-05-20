@@ -37,7 +37,7 @@
 namespace rockyou {
 
 inline constexpr std::string_view kProjectName = "rockyou2024";
-inline constexpr std::string_view kProjectVersion = "0.3.0";
+inline constexpr std::string_view kProjectVersion = "0.3.1";
 inline constexpr std::string_view kProjectAuthor = "Volker Schwaberow <volker@schwaberow.de>";
 inline constexpr std::string_view kProjectLicense = "MIT";
 
