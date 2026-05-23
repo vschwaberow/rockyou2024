@@ -1,15 +1,26 @@
 // SPDX-License-Identifier: MIT
-// (c) 2024 Volker Schwaberow <volker@schwaberow.de>
+// (c) 2024-2026 Volker Schwaberow <volker@schwaberow.de>
 
-#include "rockyou/pch.h"
+#include <print>
+#include <charconv>
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <iostream>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <vector>
 
-#include "rockyou/search_engine.h"
-#include "rockyou/terminal_ui.h"
+import rockyou.messages;
+import rockyou.search_engine;
+import rockyou.terminal_ui;
+
+namespace rockyou {}
 
 namespace {
 
-template <typename T>
-bool ParsePositive(std::string_view text, T* value) {
+template <typename T> bool ParsePositive(std::string_view text, T* value) {
   T parsed{};
   const auto result = std::from_chars(text.data(), text.data() + text.size(), parsed);
   if (result.ec != std::errc{} || parsed <= 0) {
@@ -19,14 +30,15 @@ bool ParsePositive(std::string_view text, T* value) {
   return true;
 }
 
-}  // namespace
+} // namespace
 
 int main(int argc, char* argv[]) {
   rockyou::PrintHeader();
   rockyou::SearchOptions options;
   std::string keyword;
   std::string filename;
-  if (argc == 2 && std::strcmp(argv[1], rockyou::kInteractiveFlag) == 0) {
+  rockyou::SearchOptions default_options; // for scope
+  if (argc == 2 && std::string_view(argv[1]) == rockyou::kInteractiveFlag) {
     std::println("{}", rockyou::kInteractiveHelp);
     while (true) {
       std::print("{}", rockyou::kInteractivePromptAction);
@@ -60,17 +72,17 @@ int main(int argc, char* argv[]) {
       std::fflush(stdout);
       std::string response;
       std::getline(std::cin, response);
-      session_options.case_insensitive = response == rockyou::kResponseYesLower ||
-                                         response == rockyou::kResponseYesUpper;
+      session_options.case_insensitive =
+          response == rockyou::kResponseYesLower || response == rockyou::kResponseYesUpper;
       std::error_code fs_error;
       const bool exists = std::filesystem::exists(filename, fs_error);
       if (fs_error || !exists) {
         std::print(stderr, rockyou::kFileMissingFormat, filename);
         continue;
       }
-      const auto status = rockyou::SearchZip(filename, keyword, session_options);
-      if (!status.ok()) {
-        std::print(stderr, rockyou::kErrorFormat, status.message());
+      auto res = rockyou::SearchZip(filename, keyword, session_options);
+      if (!res) {
+        std::print(stderr, rockyou::kErrorFormat, res.error().message);
       }
     }
   } else {
@@ -85,9 +97,8 @@ int main(int argc, char* argv[]) {
         options.json = true;
       } else if (arg == rockyou::kHighlightFlag) {
         options.highlight = true;
-      } else if (arg == rockyou::kLimitFlag || arg == rockyou::kPerFileLimitFlag ||
-                 arg == rockyou::kThreadsFlag || arg == rockyou::kChunkSizeFlag ||
-                 arg == rockyou::kContextSizeFlag || arg == rockyou::kChecksumFlag) {
+      } else if (arg == rockyou::kLimitFlag || arg == rockyou::kPerFileLimitFlag || arg == rockyou::kThreadsFlag ||
+                 arg == rockyou::kChunkSizeFlag || arg == rockyou::kContextSizeFlag || arg == rockyou::kChecksumFlag) {
         if (i + 1 >= argc) {
           rockyou::PrintUsage(argv[0]);
           return 1;
@@ -159,9 +170,9 @@ int main(int argc, char* argv[]) {
     std::print(stderr, rockyou::kFileMissingFormat, filename);
     return 1;
   }
-  const auto status = rockyou::SearchZip(filename, keyword, options);
-  if (!status.ok()) {
-    std::print(stderr, rockyou::kErrorFormat, status.message());
+  auto res = rockyou::SearchZip(filename, keyword, options);
+  if (!res) {
+    std::print(stderr, rockyou::kErrorFormat, res.error().message);
     return 1;
   }
   return 0;
