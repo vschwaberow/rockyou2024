@@ -1,0 +1,30 @@
+{
+    "name": "rockyou2024 C++26 (Clang + Modules + Analysis)",
+    "image": "mcr.microsoft.com/devcontainers/cpp:1-ubuntu-24.04",
+    "features": {
+        "ghcr.io/devcontainers/features/github-cli:1": {}
+    },
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "C_Cpp.default.cppStandard": "c++26",
+                "C_Cpp.default.intelliSenseMode": "linux-clang-x64",
+                "cmake.configureOnOpen": true,
+                "cmake.buildDirectory": "${workspaceFolder}/build/${buildType}",
+                "editor.formatOnSave": true,
+                "clang-tidy.executable": "/usr/bin/clang-tidy"
+            },
+            "extensions": [
+                "ms-vscode.cpptools",
+                "ms-vscode.cmake-tools",
+                "twxs.cmake",
+                "cschlosser.doxdocgen"
+            ]
+        }
+    },
+    "postCreateCommand": "sudo apt-get update && sudo apt-get install -y clang-22 clang-tidy-22 clang-format-22 lldb-22 cmake ninja-build ccache doxygen graphviz cppcheck iwyu || echo 'Some packages may need manual install or use clang from image'",
+    "remoteUser": "vscode",
+    "mounts": [
+      "source=${localWorkspaceFolder}/build,target=/workspaces/rockyou2024/build,type=bind"
+    ]
+}
