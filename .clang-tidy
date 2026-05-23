@@ -1,0 +1,61 @@
+---
+Checks: >
+  *,
+  google-*,
+  -google-readability-todo,
+  -google-runtime-references,
+  cppcoreguidelines-*,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-avoid-c-arrays,
+  -modernize-avoid-c-arrays,
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  bugprone-*,
+  performance-*,
+  readability-*,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-identifier-naming,
+  misc-*,
+  -misc-const-correctness,
+  -misc-use-anonymous-namespace,
+  -misc-non-private-member-variables-in-classes,
+  portability-*,
+  -fuchsia-*,
+  -llvm-*,
+  -zircon-*,
+  -altera-*,
+  -hicpp-*,
+  -llvmlibc-*,
+  -objc-*,
+  -android-*,
+  -mpi-*,
+  -openmp-*
+
+WarningsAsErrors: '*'
+
+HeaderFilterRegex: '.*'
+FormatStyle: file
+
+CheckOptions:
+  - key: modernize-use-designated-initializers.Strict
+    value: true
+  - key: modernize-loop-convert.MinConfidence
+    value: reasonable
+  - key: cppcoreguidelines-init-variables.IncludeInHeaderFile
+    value: false
+  - key: google-readability-braces-around-statements.ShortStatementLines
+    value: '1'
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.FunctionCase
+    value: camelBack
+  - key: readability-identifier-naming.VariableCase
+    value: camelBack
+  - key: readability-identifier-naming.ConstantCase
+    value: CamelCase
+  - key: readability-identifier-naming.ConstantPrefix
+    value: k
+  - key: performance-move-const-arg.CheckTriviallyCopyableMove
+    value: false

@@ -1,15 +1,55 @@
 // SPDX-License-Identifier: MIT
-// (c) 2024 Volker Schwaberow <volker@schwaberow.de>
+// (c) 2024-2026 Volker Schwaberow <volker@schwaberow.de>
 
-#include "rockyou/pch.h"
+module;
 
-#include "rockyou/search_engine.h"
-
-#include "rockyou/zip_reader.h"
 #include <openssl/sha.h>
 #include "blake3.h"
 
+#include <print>
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cctype>
+#include <charconv>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <limits>
+#include <map>
+#include <mutex>
+#include <optional>
+#include <ranges>
+#include <set>
+#include <span>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <thread>
+#include <tuple>
+#include <vector>
+
+module rockyou.search_engine;
+
+import rockyou.messages;
+import rockyou.error_handling;
+import rockyou.zip_reader;
+
+// Modern C++26 error handling from the module
+using rockyou::AppError;
+using rockyou::ErrorCode;
+using rockyou::MakeError;
+using rockyou::Result;
+
 namespace rockyou {
+
+using rockyou::AppError; // ensure visible inside the namespace for all declarations
+
 namespace {
 
 constexpr size_t kDefaultChunkSize = 1024 * 1024;
@@ -26,9 +66,8 @@ struct SearchResult {
 };
 
 void LowerInPlace(std::string* value) {
-  std::transform(value->begin(), value->end(), value->begin(), [](unsigned char c) {
-    return static_cast<char>(std::tolower(c));
-  });
+  std::transform(value->begin(), value->end(), value->begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 }
 
 std::vector<size_t> BoyerMoore(std::string_view text, std::string_view pattern) {
@@ -59,9 +98,7 @@ std::vector<size_t> BoyerMoore(std::string_view text, std::string_view pattern) 
   return results;
 }
 
-std::vector<size_t> SearchPositions(std::string_view text,
-                                    const std::string& pattern,
-                                    bool case_insensitive) {
+std::vector<size_t> SearchPositions(std::string_view text, const std::string& pattern, bool case_insensitive) {
   if (!case_insensitive) {
     return BoyerMoore(text, pattern);
   }
@@ -70,9 +107,7 @@ std::vector<size_t> SearchPositions(std::string_view text,
   return BoyerMoore(lowered, pattern);
 }
 
-void AppendNewlines(std::string_view chunk,
-                    size_t base_offset,
-                    std::vector<size_t>* newline_offsets) {
+void AppendNewlines(std::string_view chunk, size_t base_offset, std::vector<size_t>* newline_offsets) {
   for (size_t i = 0; i < chunk.size(); ++i) {
     if (chunk[i] == '\n') {
       newline_offsets->push_back(base_offset + i);
@@ -80,8 +115,7 @@ void AppendNewlines(std::string_view chunk,
   }
 }
 
-std::pair<int, int> ComputeLineColumn(const std::vector<size_t>& newline_offsets,
-                                      size_t position) {
+std::pair<int, int> ComputeLineColumn(const std::vector<size_t>& newline_offsets, size_t position) {
   auto it = std::upper_bound(newline_offsets.begin(), newline_offsets.end(), position);
   const size_t count = static_cast<size_t>(it - newline_offsets.begin());
   const int line = static_cast<int>(count + 1);
@@ -92,21 +126,14 @@ std::pair<int, int> ComputeLineColumn(const std::vector<size_t>& newline_offsets
   return {line, static_cast<int>(position - last_break)};
 }
 
-std::string BuildContext(std::string_view source,
-                         size_t match_offset,
-                         size_t keyword_length,
-                         size_t context_size) {
+std::string BuildContext(std::string_view source, size_t match_offset, size_t keyword_length, size_t context_size) {
   const size_t start = match_offset > context_size ? match_offset - context_size : 0;
-  const size_t end = std::min(match_offset + keyword_length + context_size,
-                              source.size());
+  const size_t end = std::min(match_offset + keyword_length + context_size, source.size());
   return std::string(source.substr(start, end - start));
 }
 
-std::string BuildHighlightedContext(std::string_view source,
-                                    size_t match_offset,
-                                    size_t keyword_length,
-                                    size_t context_size,
-                                    bool highlight) {
+std::string BuildHighlightedContext(std::string_view source, size_t match_offset, size_t keyword_length,
+                                    size_t context_size, bool highlight) {
   std::string context = BuildContext(source, match_offset, keyword_length, context_size);
   if (!highlight) {
     return context;
@@ -156,12 +183,8 @@ std::string EscapeJson(std::string_view input) {
   return escaped;
 }
 
-std::string BuildJson(const std::vector<SearchResult>& results,
-                      int total_occurrences,
-                      bool truncated,
-                      const std::vector<std::string>& errors,
-                      const SearchOptions& options,
-                      bool partial_failure) {
+std::string BuildJson(const std::vector<SearchResult>& results, int total_occurrences, bool truncated,
+                      const std::vector<std::string>& errors, const SearchOptions& options, bool partial_failure) {
   std::string json;
   json.append("{\"total\":");
   json.append(std::to_string(total_occurrences));
@@ -285,14 +308,14 @@ std::optional<ChecksumExpectation> ParseChecksumExpectation(const std::optional<
   return expectation;
 }
 
-StatusOr<std::string> ComputeSha256Hex(const std::string& path) {
+std::expected<std::string, rockyou::AppError> ComputeSha256Hex(const std::string& path) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
-    return Status::Error(std::string(kZipOpenError) + path);
+    return std::unexpected(MakeError(ErrorCode::ZipError, std::string(kZipOpenError) + path));
   }
   SHA256_CTX ctx;
   if (SHA256_Init(&ctx) != 1) {
-    return Status::Error(std::string(kChecksumMismatchError));
+    return std::unexpected(MakeError(ErrorCode::ChecksumMismatch, std::string(kChecksumMismatchError)));
   }
   std::array<unsigned char, 8192> buffer{};
   while (file.good()) {
@@ -300,13 +323,13 @@ StatusOr<std::string> ComputeSha256Hex(const std::string& path) {
     const std::streamsize read_bytes = file.gcount();
     if (read_bytes > 0) {
       if (SHA256_Update(&ctx, buffer.data(), static_cast<size_t>(read_bytes)) != 1) {
-        return Status::Error(std::string(kChecksumMismatchError));
+        return std::unexpected(MakeError(ErrorCode::ChecksumMismatch, std::string(kChecksumMismatchError)));
       }
     }
   }
   std::array<unsigned char, SHA256_DIGEST_LENGTH> digest{};
   if (SHA256_Final(digest.data(), &ctx) != 1) {
-    return Status::Error(std::string(kChecksumMismatchError));
+    return std::unexpected(MakeError(ErrorCode::ChecksumMismatch, std::string(kChecksumMismatchError)));
   }
   static constexpr char kHexDigits[] = "0123456789abcdef";
   std::string hex;
@@ -318,10 +341,10 @@ StatusOr<std::string> ComputeSha256Hex(const std::string& path) {
   return hex;
 }
 
-StatusOr<std::string> ComputeBlake3Hex(const std::string& path) {
+std::expected<std::string, AppError> ComputeBlake3Hex(const std::string& path) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
-    return Status::Error(std::string(kZipOpenError) + path);
+    return std::unexpected(MakeError(ErrorCode::ZipError, std::string(kZipOpenError) + path));
   }
   blake3_hasher hasher;
   blake3_hasher_init(&hasher);
@@ -345,58 +368,54 @@ StatusOr<std::string> ComputeBlake3Hex(const std::string& path) {
   return hex;
 }
 
-Status ValidateChecksum(const std::string& path, const std::optional<std::string>& checksum) {
+std::expected<void, rockyou::AppError> ValidateChecksum(const std::string& path,
+                                                        const std::optional<std::string>& checksum) {
   auto expectation = ParseChecksumExpectation(checksum);
   if (!expectation.has_value()) {
-    return Status::Ok();
+    return {};
   }
-  const auto compare_hex = [&](ChecksumAlgorithm algo, const std::string& expected_hex) -> Status {
+  const auto compare_hex = [&](ChecksumAlgorithm algo, const std::string& expected_hex) -> Result<void> {
     if (algo == ChecksumAlgorithm::kSha256) {
       auto hex_or = ComputeSha256Hex(path);
-      if (!hex_or.ok()) {
-        return hex_or.status();
+      if (!hex_or) {
+        return std::unexpected(hex_or.error());
       }
-      return hex_or.value() == expected_hex ? Status::Ok()
-                                            : Status::Error(std::string(kChecksumMismatchError));
+      return hex_or.value() == expected_hex
+                 ? Result<void>{}
+                 : std::unexpected(MakeError(ErrorCode::ChecksumMismatch, std::string(kChecksumMismatchError)));
     }
     if (algo == ChecksumAlgorithm::kBlake3) {
       auto hex_or = ComputeBlake3Hex(path);
-      if (!hex_or.ok()) {
-        return hex_or.status();
+      if (!hex_or) {
+        return std::unexpected(hex_or.error());
       }
-      return hex_or.value() == expected_hex ? Status::Ok()
-                                            : Status::Error(std::string(kChecksumMismatchError));
+      return hex_or.value() == expected_hex
+                 ? Result<void>{}
+                 : std::unexpected(MakeError(ErrorCode::ChecksumMismatch, std::string(kChecksumMismatchError)));
     }
     // Unknown: try both
     auto hex_sha = ComputeSha256Hex(path);
-    if (hex_sha.ok() && hex_sha.value() == expected_hex) {
-      return Status::Ok();
+    if (hex_sha && *hex_sha == expected_hex) {
+      return {};
     }
     auto hex_blake = ComputeBlake3Hex(path);
-    if (hex_blake.ok() && hex_blake.value() == expected_hex) {
-      return Status::Ok();
+    if (hex_blake && *hex_blake == expected_hex) {
+      return {};
     }
-    return Status::Error(std::string(kChecksumMismatchError));
+    return std::unexpected(MakeError(ErrorCode::SearchError, std::string(kChecksumMismatchError)));
   };
   return compare_hex(expectation->algorithm, expectation->hex);
 }
 
-StatusOr<SearchResult> SearchFile(const std::string& path,
-                                  const std::string& name,
-                                  const ZipIndexEntry& entry,
-                                  const std::string& keyword,
-                                  const std::string& pattern,
-                                  bool case_insensitive,
-                                  size_t chunk_size,
-                                  size_t context_size,
-                                  size_t min_buffer_size,
-                                  std::optional<int> per_file_limit,
-                                  bool highlight) {
+std::expected<SearchResult, rockyou::AppError>
+SearchFile(const std::string& path, const std::string& name, const ZipIndexEntry& entry, const std::string& keyword,
+           const std::string& pattern, bool case_insensitive, size_t chunk_size, size_t context_size,
+           size_t min_buffer_size, std::optional<int> per_file_limit, bool highlight) {
   auto stream_or = ZipEntryStream::Create(path, name, entry);
-  if (!stream_or.ok()) {
-    return stream_or.status();
+  if (!stream_or) {
+    return std::unexpected(stream_or.error());
   }
-  ZipEntryStream stream = stream_or.TakeValue();
+  ZipEntryStream stream = *std::move(stream_or);
   SearchResult result;
   result.filename = name;
   if (keyword.empty()) {
@@ -408,12 +427,11 @@ StatusOr<SearchResult> SearchFile(const std::string& path,
     size_t total = 0;
     while (total < buffer.size()) {
       const size_t remaining = buffer.size() - total;
-      auto read_or = stream.Read(buffer.data() + total,
-                                 static_cast<unsigned int>(remaining));
-      if (!read_or.ok()) {
-        return read_or.status();
+      auto read_or = stream.Read(buffer.data() + total, static_cast<unsigned int>(remaining));
+      if (!read_or) {
+        return std::unexpected(read_or.error());
       }
-      const int read_bytes = read_or.value();
+      const int read_bytes = *read_or;
       if (read_bytes == 0) {
         break;
       }
@@ -425,11 +443,9 @@ StatusOr<SearchResult> SearchFile(const std::string& path,
     const auto positions = SearchPositions(buffer, pattern, case_insensitive);
     for (size_t pos : positions) {
       const auto line_column = ComputeLineColumn(newline_offsets, pos);
-      const std::string context =
-          BuildHighlightedContext(buffer, pos, keyword_length, context_size, highlight);
+      const std::string context = BuildHighlightedContext(buffer, pos, keyword_length, context_size, highlight);
       result.occurrences.emplace_back(line_column.first, line_column.second, context);
-      if (per_file_limit.has_value() &&
-          static_cast<int>(result.occurrences.size()) >= per_file_limit.value()) {
+      if (per_file_limit.has_value() && static_cast<int>(result.occurrences.size()) >= per_file_limit.value()) {
         result.truncated = true;
         break;
       }
@@ -442,8 +458,8 @@ StatusOr<SearchResult> SearchFile(const std::string& path,
   size_t processed = 0;
   while (true) {
     auto read_or = stream.Read(buffer.data(), static_cast<unsigned int>(buffer.size()));
-    if (!read_or.ok()) {
-      return read_or.status();
+    if (!read_or) {
+      return std::unexpected(read_or.error());
     }
     const int read_bytes = read_or.value();
     if (read_bytes == 0) {
@@ -462,11 +478,9 @@ StatusOr<SearchResult> SearchFile(const std::string& path,
         continue;
       }
       const auto line_column = ComputeLineColumn(newline_offsets, absolute);
-      const std::string context =
-          BuildHighlightedContext(search_text, pos, keyword_length, context_size, highlight);
+      const std::string context = BuildHighlightedContext(search_text, pos, keyword_length, context_size, highlight);
       result.occurrences.emplace_back(line_column.first, line_column.second, context);
-      if (per_file_limit.has_value() &&
-          static_cast<int>(result.occurrences.size()) >= per_file_limit.value()) {
+      if (per_file_limit.has_value() && static_cast<int>(result.occurrences.size()) >= per_file_limit.value()) {
         result.truncated = true;
         break;
       }
@@ -483,48 +497,46 @@ StatusOr<SearchResult> SearchFile(const std::string& path,
       }
     }
   }
-  Status close_status = stream.CloseWithStatus();
-  if (!close_status.ok()) {
-    return close_status;
+  auto close_status = stream.CloseWithStatus();
+  if (!close_status) {
+    return std::unexpected(close_status.error());
   }
   return result;
 }
 
-}
+} // namespace
 
-Status SearchZip(const std::string& path,
-                 const std::string& keyword,
-                 const SearchOptions& options) {
+Result<void> SearchZip(const std::string& path, const std::string& keyword, const SearchOptions& options) {
   if (keyword.empty()) {
-    return Status::Error(std::string(kKeywordEmptyError));
+    return std::unexpected(MakeError(ErrorCode::InvalidInput, std::string(kKeywordEmptyError)));
   }
   if (options.limit.has_value() && options.limit.value() <= 0) {
-    return Status::Error(std::string(kInvalidLimitError));
+    return std::unexpected(MakeError(ErrorCode::InvalidInput, std::string(kInvalidLimitError)));
   }
   if (options.per_file_limit.has_value() && options.per_file_limit.value() <= 0) {
-    return Status::Error(std::string(kInvalidLimitError));
+    return std::unexpected(MakeError(ErrorCode::InvalidInput, std::string(kInvalidLimitError)));
   }
   if (options.thread_count.has_value() && options.thread_count.value() == 0) {
-    return Status::Error(std::string(kInvalidThreadCountError));
+    return std::unexpected(MakeError(ErrorCode::InvalidInput, std::string(kInvalidThreadCountError)));
   }
   if (options.chunk_size.has_value() && options.chunk_size.value() == 0) {
-    return Status::Error(std::string(kInvalidChunkSizeError));
+    return std::unexpected(MakeError(ErrorCode::SearchError, std::string(kInvalidChunkSizeError)));
   }
   if (options.context_size.has_value() && options.context_size.value() == 0) {
-    return Status::Error(std::string(kInvalidContextSizeError));
+    return std::unexpected(MakeError(ErrorCode::SearchError, std::string(kInvalidContextSizeError)));
   }
   const size_t chunk_size = options.chunk_size.value_or(kDefaultChunkSize);
   const size_t min_buffer_size = kDefaultMinFileSizeForBuffer;
   const size_t context_size = options.context_size.value_or(static_cast<size_t>(kDefaultContextSize));
   auto checksum_status = ValidateChecksum(path, options.checksum);
-  if (!checksum_status.ok()) {
-    return checksum_status;
+  if (!checksum_status) {
+    return std::unexpected(checksum_status.error());
   }
   auto index_or = BuildZipIndex(path);
-  if (!index_or.ok()) {
-    return index_or.status();
+  if (!index_or) {
+    return std::unexpected(index_or.error());
   }
-  ZipIndex index = index_or.TakeValue();
+  ZipIndex index = *std::move(index_or);
   std::vector<std::pair<std::string, ZipIndexEntry>> entries;
   entries.reserve(index.size());
   for (const auto& item : index) {
@@ -532,7 +544,7 @@ Status SearchZip(const std::string& path,
   }
   if (entries.empty()) {
     std::println(kNoEntriesMessage);
-    return Status::Ok();
+    return {};
   }
   std::vector<std::optional<SearchResult>> results(entries.size());
   std::vector<std::string> errors;
@@ -558,27 +570,19 @@ Status SearchZip(const std::string& path,
           break;
         }
         const auto& entry = entries[index_value];
-        auto result_or = SearchFile(path,
-                                    entry.first,
-                                    entry.second,
-                                    keyword,
-                                    pattern,
-                                    options.case_insensitive,
-                                    chunk_size,
-                                    context_size,
-                                    min_buffer_size,
-                                    options.per_file_limit,
-                                    options.highlight);
-        if (!result_or.ok()) {
+        auto result_or =
+            SearchFile(path, entry.first, entry.second, keyword, pattern, options.case_insensitive, chunk_size,
+                       context_size, min_buffer_size, options.per_file_limit, options.highlight);
+        if (!result_or) {
           std::lock_guard<std::mutex> lock(errors_mutex);
-          errors.push_back(std::format(kErrorProcessingFormat, entry.first, result_or.status().message()));
+          errors.push_back(std::format(kErrorProcessingFormat, entry.first, result_or.error().message));
           SearchResult failed;
           failed.filename = entry.first;
-          failed.error = result_or.status().message();
+          failed.error = result_or.error().message;
           results[index_value] = std::move(failed);
           continue;
         }
-        SearchResult result = result_or.TakeValue();
+        SearchResult result = *std::move(result_or);
         total_count.fetch_add(static_cast<int>(result.occurrences.size()), std::memory_order_relaxed);
         results[index_value] = std::move(result);
       }
@@ -602,22 +606,19 @@ Status SearchZip(const std::string& path,
   }
 
   for (auto& result : finalized) {
-    std::sort(result.occurrences.begin(),
-              result.occurrences.end(),
-              [](const Occurrence& a, const Occurrence& b) {
-                if (std::get<0>(a) != std::get<0>(b)) {
-                  return std::get<0>(a) < std::get<0>(b);
-                }
-                if (std::get<1>(a) != std::get<1>(b)) {
-                  return std::get<1>(a) < std::get<1>(b);
-                }
-                return std::get<2>(a) < std::get<2>(b);
-              });
+    std::sort(result.occurrences.begin(), result.occurrences.end(), [](const Occurrence& a, const Occurrence& b) {
+      if (std::get<0>(a) != std::get<0>(b)) {
+        return std::get<0>(a) < std::get<0>(b);
+      }
+      if (std::get<1>(a) != std::get<1>(b)) {
+        return std::get<1>(a) < std::get<1>(b);
+      }
+      return std::get<2>(a) < std::get<2>(b);
+    });
   }
 
-  std::sort(finalized.begin(), finalized.end(), [](const SearchResult& a, const SearchResult& b) {
-    return a.filename < b.filename;
-  });
+  std::sort(finalized.begin(), finalized.end(),
+            [](const SearchResult& a, const SearchResult& b) { return a.filename < b.filename; });
 
   const size_t limit_value =
       options.limit.has_value() ? static_cast<size_t>(options.limit.value()) : std::numeric_limits<size_t>::max();
@@ -663,7 +664,7 @@ Status SearchZip(const std::string& path,
     std::string json_output =
         BuildJson(finalized, total_after_limit, truncated_global, errors, options, partial_failure);
     if (json_output.empty()) {
-      return Status::Error(std::string(kJsonSerializationError));
+      return std::unexpected(MakeError(ErrorCode::SearchError, std::string(kJsonSerializationError)));
     }
     std::println("{}", json_output);
   } else if (options.quiet) {
@@ -676,13 +677,13 @@ Status SearchZip(const std::string& path,
       }
     }
     if (truncated_global) {
-      std::println("{}", kResultsTruncatedMessage);
+      std::println("{}", rockyou::kResultsTruncatedMessage);
     }
   } else {
     for (const auto& result : finalized) {
       std::println(kOccurrencesFormat, result.filename, result.occurrences.size());
       if (result.truncated) {
-        std::println("  {}", kResultsTruncatedMessage);
+        std::println("  {}", rockyou::kResultsTruncatedMessage);
       }
       for (const auto& occurrence : result.occurrences) {
         const int line = std::get<0>(occurrence);
@@ -694,14 +695,14 @@ Status SearchZip(const std::string& path,
     std::println(kSearchCompleteFormat, total_after_limit);
     std::println(kTimeTakenFormat, elapsed.count());
     if (truncated_global) {
-      std::println("{}", kResultsTruncatedMessage);
+      std::println("{}", rockyou::kResultsTruncatedMessage);
     }
   }
 
   if (errors.empty()) {
-    return Status::Ok();
+    return {};
   }
-  return Status::Error(build_combined_errors());
+  return std::unexpected(MakeError(ErrorCode::SearchError, build_combined_errors()));
 }
 
-}
+} // namespace rockyou

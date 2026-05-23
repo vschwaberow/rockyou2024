@@ -1,14 +1,20 @@
 // SPDX-License-Identifier: MIT
-// (c) 2024 Volker Schwaberow <volker@schwaberow.de>
+// (c) 2024-2026 Volker Schwaberow <volker@schwaberow.de>
 
-#include "rockyou/pch.h"
+module;
 
-#include "rockyou/terminal_ui.h"
+#include <print>
+#include <string>
+#include <string_view>
+
+module rockyou.terminal_ui;
+
+import rockyou.messages;
 
 namespace rockyou {
 
 void PrintHeader() {
-  const char kAsciiArt[] = R"(
+  constexpr std::string_view kAsciiArt = R"(
  ____   ___   ____ _  ____   __ ___  _   _ ____   ___ ____  _  _
 |  _ \ / _ \ / ___| |/ /\ \ / // _ \| | | |___ \ / _ \___ \| || |
 | |_) | | | | |   | ' /  \ V /| | | | | | | __) | | | |__) | || |_
@@ -19,31 +25,28 @@ void PrintHeader() {
 Based on rockyou2024 cpp by Mike Madden
 
 )";
-  std::print(rockyou::kBannerForeground);
-  for (size_t i = 0; kAsciiArt[i] != '\0'; ++i) {
-    std::print("{}", kAsciiArt[i]);
-  }
-  std::print(rockyou::kBannerReset);
+
+  std::print("{}{}{}", kBannerForeground, kAsciiArt, kBannerReset);
   std::println("Version {} ({})", kProjectVersion, kProjectLicense);
   std::println("Author {}", kProjectAuthor);
 }
 
 void PrintUsage(const std::string& program_name) {
-  std::println(rockyou::kUsageHeader, program_name);
-  std::println(rockyou::kUsageInteractive, program_name);
-  std::println(rockyou::kUsageOptionsHeader);
-  std::println(rockyou::kUsageInteractiveOption);
-  std::println(rockyou::kUsageCaseInsensitiveOption);
-  std::println(rockyou::kUsageQuietOption);
-  std::println(rockyou::kUsageJsonOption);
-  std::println(rockyou::kUsageLimitOption);
-  std::println(rockyou::kUsagePerFileLimitOption);
-  std::println(rockyou::kUsageThreadsOption);
-  std::println(rockyou::kUsageChunkOption);
-  std::println(rockyou::kUsageContextOption);
-  std::println(rockyou::kUsageChecksumOption);
-  std::println(rockyou::kUsageHighlightOption);
-  std::println(rockyou::kUsageHelpOption);
+  std::println(kUsageHeader, program_name);
+  std::println(kUsageInteractive, program_name);
+  std::println(kUsageOptionsHeader);
+  std::println(kUsageInteractiveOption);
+  std::println(kUsageCaseInsensitiveOption);
+  std::println(kUsageQuietOption);
+  std::println(kUsageJsonOption);
+  std::println(kUsageLimitOption);
+  std::println(kUsagePerFileLimitOption);
+  std::println(kUsageThreadsOption);
+  std::println(kUsageChunkOption);
+  std::println(kUsageContextOption);
+  std::println(kUsageChecksumOption);
+  std::println(kUsageHighlightOption);
+  std::println(kUsageHelpOption);
 }
 
-}
+} // namespace rockyou
