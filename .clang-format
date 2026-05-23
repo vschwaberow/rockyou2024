@@ -1,0 +1,39 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+
+Standard: c++20
+ColumnLimit: 120
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+
+SortIncludes: CaseSensitive
+IncludeCategories:
+  - Regex:           '^<print>'
+    Priority:        1
+  - Regex:           '^<.*>'
+    Priority:        2
+  - Regex:           '.*'
+    Priority:        3
+
+RequiresClausePosition: WithPreceding
+RequiresExpressionIndentation: OuterScope
+
+MaxEmptyLinesToKeep: 1
+AllowShortLambdasOnASingleLine: Inline
+
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+AttributeMacros: ['[[pre', '[[post', '[[assert', '[[expects', '[[ensures']
+
+DerivePointerAlignment: false
+AlignAfterOpenBracket: Align
+AlignOperands: Align
+AlignTrailingComments: true
+
+IndentCaseLabels: true
+IndentCaseBlocks: false
+IndentGotoLabels: false
+
