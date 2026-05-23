@@ -2,8 +2,9 @@ name: Cross-Platform Build
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, rewrite_cpp26 ]
   pull_request:
+    branches: [ main, rewrite_cpp26 ]
   release:
     types: [published]
 
@@ -23,8 +24,8 @@ jobs:
             ctest_config: ""
             cpack_config: Release
             artifact_suffix: linux
-            cc: gcc-14
-            cxx: g++-14
+            cc: clang
+            cxx: clang++
           - os: macos-latest
             generator: "Unix Makefiles"
             build_dir: build/macos
@@ -33,8 +34,8 @@ jobs:
             ctest_config: ""
             cpack_config: Release
             artifact_suffix: macos
-            cc: ""
-            cxx: ""
+            cc: clang
+            cxx: clang++
           - os: windows-latest
             generator: "Visual Studio 17 2022"
             build_dir: build/windows
@@ -49,12 +50,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install GCC 14
-        if: matrix.os == 'ubuntu-latest'
+      - name: Ensure Clang is available
+        if: matrix.os != 'windows-latest'
         run: |
-          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-          sudo apt-get update
-          sudo apt-get install -y g++-14
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y clang
+          fi
+          # macOS: AppleClang is provided by the runner
+          clang --version || true
 
       - name: Configure CMake
         env:
@@ -94,11 +98,10 @@ jobs:
 
       - name: Upload release asset
         if: github.event_name == 'release'
-        uses: actions/upload-release-asset@v1
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            "${{ steps.locate-package.outputs.package }}" \
+            --repo "${{ github.repository }}" \
+            --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ${{ steps.locate-package.outputs.package }}
-          asset_name: search-${{ matrix.artifact_suffix }}-${{ github.ref_name }}.zip
-          asset_content_type: application/zip
