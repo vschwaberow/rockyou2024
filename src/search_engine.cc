@@ -20,6 +20,7 @@ module;
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <latch>
 #include <limits>
 #include <map>
 #include <mutex>
@@ -27,6 +28,7 @@ module;
 #include <ranges>
 #include <set>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -98,7 +100,7 @@ std::vector<size_t> BoyerMoore(std::string_view text, std::string_view pattern) 
   return results;
 }
 
-std::vector<size_t> SearchPositions(std::string_view text, const std::string& pattern, bool case_insensitive) {
+std::vector<size_t> SearchPositions(std::string_view text, std::string_view pattern, bool case_insensitive) {
   if (!case_insensitive) {
     return BoyerMoore(text, pattern);
   }
@@ -409,7 +411,7 @@ std::expected<void, rockyou::AppError> ValidateChecksum(const std::string& path,
 
 std::expected<SearchResult, rockyou::AppError>
 SearchFile(const std::string& path, const std::string& name, const ZipIndexEntry& entry, const std::string& keyword,
-           const std::string& pattern, bool case_insensitive, size_t chunk_size, size_t context_size,
+           std::string_view pattern, bool case_insensitive, size_t chunk_size, size_t context_size,
            size_t min_buffer_size, std::optional<int> per_file_limit, bool highlight) {
   auto stream_or = ZipEntryStream::Create(path, name, entry);
   if (!stream_or) {
@@ -547,62 +549,98 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
     return {};
   }
   std::vector<std::optional<SearchResult>> results(entries.size());
-  std::vector<std::string> errors;
-  std::mutex errors_mutex;
-  std::atomic<size_t> next_index(0);
-  std::atomic<int> total_count(0);
-  std::string pattern = keyword;
+  std::vector<std::optional<std::string>> errors(entries.size());
+  std::atomic<size_t> next_index{0};
+  std::atomic<int> remaining_limit{options.limit.has_value() ? options.limit.value() : std::numeric_limits<int>::max()};
+  std::string pattern_storage = keyword;
   if (options.case_insensitive) {
-    LowerInPlace(&pattern);
+    LowerInPlace(&pattern_storage);
   }
+  const std::string_view pattern = pattern_storage;
   const auto start_time = std::chrono::high_resolution_clock::now();
   unsigned int thread_count = options.thread_count.value_or(std::thread::hardware_concurrency());
   if (thread_count == 0) {
-    thread_count = 4;
+    thread_count = kDefaultThreadCountFallback;
   }
-  std::vector<std::thread> workers;
+  std::stop_source stop_source;
+  std::latch completion_latch{static_cast<std::ptrdiff_t>(thread_count)};
+  std::vector<std::jthread> workers;
   workers.reserve(thread_count);
-  for (unsigned int i = 0; i < thread_count; ++i) {
-    workers.emplace_back([&, pattern]() {
+  for ([[maybe_unused]] const auto _ : std::views::iota(0u, thread_count)) {
+    workers.emplace_back([&](std::stop_token stop_token) {
+      std::stop_callback stop_callback(stop_source.get_token(), [&]() noexcept { stop_source.request_stop(); });
       while (true) {
-        const size_t index_value = next_index.fetch_add(1, std::memory_order_relaxed);
-        if (index_value >= entries.size()) {
+        if (stop_token.stop_requested()) {
           break;
         }
-        const auto& entry = entries[index_value];
-        auto result_or =
-            SearchFile(path, entry.first, entry.second, keyword, pattern, options.case_insensitive, chunk_size,
-                       context_size, min_buffer_size, options.per_file_limit, options.highlight);
-        if (!result_or) {
-          std::lock_guard<std::mutex> lock(errors_mutex);
-          errors.push_back(std::format(kErrorProcessingFormat, entry.first, result_or.error().message));
-          SearchResult failed;
-          failed.filename = entry.first;
-          failed.error = result_or.error().message;
-          results[index_value] = std::move(failed);
-          continue;
+        const size_t batch_start = next_index.fetch_add(kWorkBatchSize, std::memory_order_relaxed);
+        if (batch_start >= entries.size()) {
+          break;
         }
-        SearchResult result = *std::move(result_or);
-        total_count.fetch_add(static_cast<int>(result.occurrences.size()), std::memory_order_relaxed);
-        results[index_value] = std::move(result);
+        const size_t batch_end = std::min(batch_start + kWorkBatchSize, entries.size());
+        for (size_t idx = batch_start; idx < batch_end; ++idx) {
+          if (stop_token.stop_requested()) {
+            break;
+          }
+          int slot_budget = remaining_limit.load(std::memory_order_relaxed);
+          if (slot_budget <= 0) {
+            SearchResult skipped;
+            skipped.filename = entries[idx].first;
+            skipped.truncated = true;
+            results[idx] = std::move(skipped);
+            stop_source.request_stop();
+            continue;
+          }
+          const auto& entry = entries[idx];
+          auto result_or =
+              SearchFile(path, entry.first, entry.second, keyword, pattern, options.case_insensitive, chunk_size,
+                         context_size, min_buffer_size, options.per_file_limit, options.highlight);
+          if (!result_or) {
+            errors[idx] = std::format(kErrorProcessingFormat, entry.first, result_or.error().message);
+            SearchResult failed;
+            failed.filename = entry.first;
+            failed.error = result_or.error().message;
+            results[idx] = std::move(failed);
+            continue;
+          }
+          SearchResult result = *std::move(result_or);
+          const int found = static_cast<int>(result.occurrences.size());
+          results[idx] = std::move(result);
+          const int previous_budget = remaining_limit.fetch_sub(found, std::memory_order_relaxed);
+          if (previous_budget - found <= 0 && previous_budget > 0) {
+            if (idx < results.size() && results[idx].has_value()) {
+              results[idx]->truncated = true;
+            }
+            stop_source.request_stop();
+            break;
+          }
+        }
       }
+      completion_latch.count_down();
     });
   }
-  for (auto& worker : workers) {
-    worker.join();
-  }
+  completion_latch.wait();
+  workers.clear();
   const auto end_time = std::chrono::high_resolution_clock::now();
   const std::chrono::duration<double> elapsed = end_time - start_time;
 
   std::vector<SearchResult> finalized;
   finalized.reserve(results.size());
   int total_occurrences = 0;
-  for (const auto& result : results) {
-    if (!result.has_value()) {
+  for (auto& slot : results) {
+    if (!slot.has_value()) {
       continue;
     }
-    total_occurrences += static_cast<int>(result->occurrences.size());
-    finalized.push_back(result.value());
+    total_occurrences += static_cast<int>(slot->occurrences.size());
+    finalized.push_back(std::move(slot).value());
+  }
+
+  std::vector<std::string> error_messages;
+  error_messages.reserve(errors.size());
+  for (auto& slot : errors) {
+    if (slot.has_value()) {
+      error_messages.push_back(std::move(slot).value());
+    }
   }
 
   for (auto& result : finalized) {
@@ -626,6 +664,9 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
   size_t remaining = limit_value;
   int total_after_limit = 0;
   for (auto& result : finalized) {
+    if (result.truncated) {
+      truncated_global = true;
+    }
     if (remaining == 0) {
       if (!result.occurrences.empty()) {
         result.occurrences.clear();
@@ -647,22 +688,11 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
     total_after_limit = total_occurrences;
   }
 
-  auto build_combined_errors = [&errors]() -> std::string {
-    std::string combined;
-    for (size_t i = 0; i < errors.size(); ++i) {
-      if (i != 0) {
-        combined.append("\n");
-      }
-      combined.append(errors[i]);
-    }
-    return combined;
-  };
-
-  const bool partial_failure = !errors.empty();
+  const bool partial_failure = !error_messages.empty();
 
   if (options.json) {
     std::string json_output =
-        BuildJson(finalized, total_after_limit, truncated_global, errors, options, partial_failure);
+        BuildJson(finalized, total_after_limit, truncated_global, error_messages, options, partial_failure);
     if (json_output.empty()) {
       return std::unexpected(MakeError(ErrorCode::SearchError, std::string(kJsonSerializationError)));
     }
@@ -699,10 +729,17 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
     }
   }
 
-  if (errors.empty()) {
+  if (error_messages.empty()) {
     return {};
   }
-  return std::unexpected(MakeError(ErrorCode::SearchError, build_combined_errors()));
+  std::string combined_errors;
+  for (size_t i = 0; i < error_messages.size(); ++i) {
+    if (i != 0) {
+      combined_errors.append("\n");
+    }
+    combined_errors.append(error_messages[i]);
+  }
+  return std::unexpected(MakeError(ErrorCode::SearchError, std::move(combined_errors)));
 }
 
 } // namespace rockyou

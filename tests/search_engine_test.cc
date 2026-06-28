@@ -202,6 +202,47 @@ TEST(SearchEngineTest, SearchZipLimitCausesTruncationInJson) {
   EXPECT_NE(output.find("\"limit\":1"), std::string::npos);
 }
 
+TEST(SearchEngineTest, SearchZipRespectsExplicitThreadCount) {
+  rockyou::SearchOptions options;
+  options.thread_count = 2;
+  const auto res = rockyou::SearchZip(TestDataPath("sample.zip").string(), "password123", options);
+  ASSERT_TRUE(res.has_value()) << res.error().message;
+}
+
+TEST(SearchEngineTest, SearchZipRespectsHardwareFallbackThreadCount) {
+  rockyou::SearchOptions options;
+  options.thread_count = 1;
+  const auto res = rockyou::SearchZip(TestDataPath("sample.zip").string(), "password123", options);
+  ASSERT_TRUE(res.has_value()) << res.error().message;
+}
+
+TEST(SearchEngineTest, SearchZipDeterministicWithLimitAcrossThreads) {
+  rockyou::SearchOptions options;
+  options.json = true;
+  options.case_insensitive = true;
+  options.thread_count = 4;
+  options.limit = 1;
+  testing::internal::CaptureStdout();
+  const auto res = rockyou::SearchZip(TestDataPath("sample.zip").string(), "password123", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(res.has_value()) << res.error().message;
+  EXPECT_NE(output.find("\"truncated\":true"), std::string::npos);
+  EXPECT_NE(output.find("\"total\":1"), std::string::npos);
+}
+
+TEST(SearchEngineTest, SearchZipProducesFullCountWithoutLimit) {
+  rockyou::SearchOptions options;
+  options.json = true;
+  options.case_insensitive = true;
+  options.thread_count = 2;
+  testing::internal::CaptureStdout();
+  const auto res = rockyou::SearchZip(TestDataPath("sample.zip").string(), "password123", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(res.has_value()) << res.error().message;
+  EXPECT_NE(output.find("\"total\":2"), std::string::npos);
+  EXPECT_NE(output.find("\"truncated\":false"), std::string::npos);
+}
+
 TEST(SearchEngineTest, SearchZipPerFileLimitAffectsResults) {
   testing::internal::CaptureStdout();
   rockyou::SearchOptions options;

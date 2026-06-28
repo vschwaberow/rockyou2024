@@ -144,8 +144,8 @@ target_compile_options(search_tests PRIVATE
 target_compile_definitions(search_tests PRIVATE TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data")
 add_test(NAME search_tests COMMAND search_tests)
 
-# C++26 / Jason Turner style: coverage instrumentation for Debug builds
-# (enables gcovr reports and 90% hard gate)
+#C++ 26 / Jason Turner style : coverage instrumentation for Debug builds
+#(enables gcovr reports and 90 % hard gate)
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   option(ROCKYOU_ENABLE_COVERAGE "Build with coverage instrumentation (Debug only)" OFF)
   if(ROCKYOU_ENABLE_COVERAGE AND CMAKE_BUILD_TYPE STREQUAL "Debug")
