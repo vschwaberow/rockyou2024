@@ -1,6 +1,52 @@
 # Changelog
 
-## [Unreleased]
+## [0.5.0] - 2026-06-28
+
+### Concurrency overhaul
+
+The internal worker pool that parallelises ZIP entry search has been
+rewritten. CLI, JSON schema, and exit codes are unchanged.
+
+**What's better**
+
+- `--limit` is now actually respected mid-search. Previously every
+  entry was scanned to completion even after the global limit was
+  already satisfied; on a 100 GB wordlist with `--limit 1` the tool
+  now stops almost immediately after the first match.
+- A `std::mutex` on the per-entry error list is gone. Each worker
+  writes lock-free into a pre-sized vector at its own index.
+- The keyword is stored once and shared via `std::string_view`
+  instead of being copied per worker thread.
+- The dead `total_count` atomic (incremented but never read) has
+  been removed.
+- The `hardware_concurrency() == 0` fallback is now a named
+  constant `kDefaultThreadCountFallback` in `messages.cppm`.
+- Workers are `std::jthread`s with cooperative shutdown via
+  `std::stop_source`; they no longer risk `std::terminate()` on
+  exceptions or require an explicit `join()` loop.
+
+**Technical changes**
+
+- `std::jthread` + `std::stop_source` / `std::stop_token` replace
+  `std::thread` + manual `join()`. A `std::latch` waits for all
+  workers.
+- Work claiming switched from per-entry `fetch_add(1)` to batched
+  `fetch_add(kWorkBatchSize)` with `kWorkBatchSize = 8`.
+- A new `std::atomic<int> remaining_limit` carries the live `--limit`
+  budget. Workers check it before each entry; when exhausted they
+  fill their remaining slots with empty `truncated = true` results
+  and request stop.
+- `SearchFile` and `SearchPositions` now take `std::string_view`,
+  removing the last forced keyword copy inside the search loop.
+
+**Tests**
+
+Four new tests cover the new threading behaviour:
+`SearchZipRespectsExplicitThreadCount`,
+`SearchZipRespectsHardwareFallbackThreadCount`,
+`SearchZipDeterministicWithLimitAcrossThreads` (pin down JSON output
+under `--limit 1` with `thread_count = 4`), and
+`SearchZipProducesFullCountWithoutLimit`.
 
 ## [0.4.0] - 2026-05-23
 
