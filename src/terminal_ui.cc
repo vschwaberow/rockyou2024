@@ -46,6 +46,8 @@ void PrintUsage(const std::string& program_name) {
   std::println(kUsageContextOption);
   std::println(kUsageChecksumOption);
   std::println(kUsageHighlightOption);
+  std::println(kUsageRegexOption);
+  std::println(kUsageRegexModeOption);
   std::println(kUsageHelpOption);
 }
 

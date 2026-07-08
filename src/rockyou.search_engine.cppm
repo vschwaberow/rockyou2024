@@ -37,12 +37,14 @@ struct SearchOptions {
   bool quiet = false;
   bool json = false;
   bool highlight = false;
+  bool regex = false;
   std::optional<int> limit;
   std::optional<int> per_file_limit;
   std::optional<unsigned int> thread_count;
   std::optional<size_t> chunk_size;
   std::optional<size_t> context_size;
   std::optional<std::string> checksum;
+  std::optional<std::string> regex_mode;
 };
 
 Result<void> SearchZip(const std::string& path, const std::string& keyword, const SearchOptions& options);
