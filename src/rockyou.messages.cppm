@@ -90,8 +90,22 @@ inline constexpr std::string_view kInteractiveHelp =
 inline constexpr std::string_view kInteractivePromptAction = "Action (s=search, q=quit): ";
 inline constexpr std::string_view kInteractiveExit = "Exiting interactive mode.";
 
+inline constexpr std::string_view kRegexFlag = "--regex";
+inline constexpr std::string_view kRegexModeFlag = "--regex-mode";
+inline constexpr std::string_view kUsageRegexOption =
+    "  --regex          Enable regex pattern matching instead of literal keyword";
+inline constexpr std::string_view kUsageRegexModeOption =
+    "  --regex-mode MODE Set regex mode: ecmascript|awk|grep|egrep (default: ecmascript)";
+inline constexpr std::string_view kErrorEmptyRegexPattern = "Regex pattern must not be empty";
+inline constexpr std::string_view kErrorInvalidRegexPattern = "Invalid regex pattern '{}': {}";
+inline constexpr std::string_view kRegexPatternFormat = "Regex pattern: {} ({})";
+inline constexpr std::string_view kPromptUseRegex = "Use regex pattern matching? (y/n): ";
+inline constexpr std::string_view kPromptEnterRegexPattern = "Enter the regex pattern to search: ";
+inline constexpr std::string_view kPromptEnterRegexMode =
+    "Enter regex mode (ecmascript/awk/grep/egrep, or leave blank for default): ";
+
 inline constexpr std::string_view kProjectName = "rockyou2024";
-inline constexpr std::string_view kProjectVersion = "0.5.0";
+inline constexpr std::string_view kProjectVersion = "0.6.0";
 inline constexpr std::string_view kProjectAuthor = "Volker Schwaberow <volker@schwaberow.de>";
 inline constexpr std::string_view kProjectLicense = "MIT";
 

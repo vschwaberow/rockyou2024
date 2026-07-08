@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.30)
 
-project(rockyou2024 VERSION 0.4.0 LANGUAGES C CXX)
+project(rockyou2024 VERSION 0.6.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -91,6 +91,7 @@ target_sources(search_core
       src/rockyou.search_engine.cppm
       src/rockyou.terminal_ui.cppm
       src/rockyou.zip_reader.cppm
+      src/rockyou.regex_engine.cppm
   PRIVATE
     src/search_engine.cc
     src/terminal_ui.cc

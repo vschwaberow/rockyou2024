@@ -13,6 +13,7 @@ import rockyou.search_engine;
 import rockyou.error_handling;
 import rockyou.zip_reader;
 import rockyou.messages;
+import rockyou.regex_engine;
 
 namespace rockyou {}
 
@@ -413,6 +414,186 @@ TEST(SearchEngineTest, CLILongKeywordDoesNotCrash) {
   std::string cmd = bin + " " + zip + " " + long_kw + " > /tmp/rockyou_cli_long.txt 2>&1";
   int ret = std::system(cmd.c_str());
   EXPECT_GE(ret, 0);
+}
+
+// Regex Pattern Search Tests
+TEST(RegexEngineTest, RegexSearchFindsBasicPattern) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "password123", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);
+}
+
+TEST(RegexEngineTest, RegexSearchWithWildcardPattern) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "pass.*123", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);
+}
+
+TEST(RegexEngineTest, RegexSearchWithCharacterClass) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "[Bb]eta.*[0-9]", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);
+}
+
+TEST(RegexEngineTest, RegexSearchFindsMultipleMatchesWithAlternation) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "(alpha|epsilon)", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);
+  EXPECT_NE(output.find("Occurrences in \"nested/other.txt\": 1"), std::string::npos);
+}
+
+TEST(RegexEngineTest, RegexSearchWithQuantifiers) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "p.*d", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);
+}
+
+TEST(RegexEngineTest, RegexSearchAnchoredPattern) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "^alpha", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);
+}
+
+TEST(RegexEngineTest, RegexSearchRejectsEmptyPattern) {
+  rockyou::SearchOptions options;
+  options.regex = true;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "", options);
+  EXPECT_FALSE(status.has_value());
+  if (!status) {
+    EXPECT_EQ(status.error().code, rockyou::ErrorCode::InvalidInput);
+  }
+}
+
+TEST(RegexEngineTest, RegexSearchRejectsInvalidPattern) {
+  rockyou::SearchOptions options;
+  options.regex = true;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "[unclosed", options);
+  EXPECT_FALSE(status.has_value());
+  if (!status) {
+    EXPECT_EQ(status.error().code, rockyou::ErrorCode::InvalidInput);
+  }
+}
+
+TEST(RegexEngineTest, RegexSearchWithJsonOutput) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  options.json = true;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "pass.*123", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("\"total\""), std::string::npos);
+  EXPECT_NE(output.find("\"regex\":true"), std::string::npos);
+  EXPECT_NE(output.find("\"regex_mode\":\"\""), std::string::npos);
+}
+
+TEST(RegexEngineTest, RegexSearchWithQuietMode) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  options.quiet = true;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "alpha", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_EQ(output.find("Occurrences"), std::string::npos);
+  EXPECT_NE(output.find("common.txt"), std::string::npos);
+}
+
+TEST(RegexEngineTest, RegexSearchWithLimit) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  options.limit = 1;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "(alpha|Beta|gamma|delta|epsilon)", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("truncated"), std::string::npos);
+}
+
+TEST(RegexEngineTest, RegexSearchECMAScriptMode) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  options.regex_mode = "ecmascript";
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "[A-Z][a-z]+", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("Occurrences in \"common.txt\""), std::string::npos);
+}
+
+TEST(RegexEngineTest, RegexSearchGrepMode) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  options.regex_mode = "grep";
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "pass", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);
+}
+
+TEST(RegexEngineTest, RegexSearchWithSpecialCharacters) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "\\w+\\d+", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);
+}
+
+TEST(RegexEngineTest, RegexSearchWithRepetition) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "s{2}", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);
+}
+
+TEST(RegexEngineTest, RegexSearchEmailPattern) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "[a-z]+@[a-z]+\\.[a-z]+", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+}
+
+TEST(RegexEngineTest, RegexSearchWithPerFileLimit) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  options.per_file_limit = 1;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "[a-z]+", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("truncated"), std::string::npos);
 }
 
 } // namespace

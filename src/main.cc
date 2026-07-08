@@ -97,8 +97,11 @@ int main(int argc, char* argv[]) {
         options.json = true;
       } else if (arg == rockyou::kHighlightFlag) {
         options.highlight = true;
+      } else if (arg == rockyou::kRegexFlag) {
+        options.regex = true;
       } else if (arg == rockyou::kLimitFlag || arg == rockyou::kPerFileLimitFlag || arg == rockyou::kThreadsFlag ||
-                 arg == rockyou::kChunkSizeFlag || arg == rockyou::kContextSizeFlag || arg == rockyou::kChecksumFlag) {
+                 arg == rockyou::kChunkSizeFlag || arg == rockyou::kContextSizeFlag || arg == rockyou::kChecksumFlag ||
+                 arg == rockyou::kRegexModeFlag) {
         if (i + 1 >= argc) {
           rockyou::PrintUsage(argv[0]);
           return 1;
@@ -141,6 +144,8 @@ int main(int argc, char* argv[]) {
           options.context_size = parsed;
         } else if (arg == rockyou::kChecksumFlag) {
           options.checksum = std::string(value);
+        } else if (arg == rockyou::kRegexModeFlag) {
+          options.regex_mode = std::string(value);
         }
         ++i;
       } else if (arg == "--help") {
