@@ -91,7 +91,7 @@ inline constexpr std::string_view kInteractivePromptAction = "Action (s=search, 
 inline constexpr std::string_view kInteractiveExit = "Exiting interactive mode.";
 
 inline constexpr std::string_view kProjectName = "rockyou2024";
-inline constexpr std::string_view kProjectVersion = "0.5.0";
+inline constexpr std::string_view kProjectVersion = "0.6.0";
 inline constexpr std::string_view kProjectAuthor = "Volker Schwaberow <volker@schwaberow.de>";
 inline constexpr std::string_view kProjectLicense = "MIT";
 

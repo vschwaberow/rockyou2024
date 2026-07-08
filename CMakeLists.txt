@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.30)
 
-project(rockyou2024 VERSION 0.4.0 LANGUAGES C CXX)
+project(rockyou2024 VERSION 0.6.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
