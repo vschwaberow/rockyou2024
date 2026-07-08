@@ -91,6 +91,7 @@ target_sources(search_core
       src/rockyou.search_engine.cppm
       src/rockyou.terminal_ui.cppm
       src/rockyou.zip_reader.cppm
+      src/rockyou.regex_engine.cppm
   PRIVATE
     src/search_engine.cc
     src/terminal_ui.cc
