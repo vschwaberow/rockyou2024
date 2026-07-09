@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.7.0] - 2026-07-09
+
+### New output modes
+
+- `--count` prints only the total match count — a bare number on
+  stdout, or `{"total": N}` when combined with `--json`. Useful for
+  scripting and quick existence checks.
+- `--stats` prints search statistics to stderr (stdout is unaffected):
+  entries searched/skipped/errored, bytes decompressed, per-phase
+  timing (init, search, finalize, total), throughput in MB/s, and a
+  top-5 entries-by-hits ranking. Combinable with `--json`, `--quiet`,
+  `--count`, and `--regex`.
+
+### Tests
+
+Two new tests for `--count` (plain number, JSON variant) and two for
+`--stats` (stderr content, stdout isolation).
+
+## [0.6.0] - 2026-06-30
+
+### Regex pattern search
+
+- `--regex` flag enables regex pattern matching instead of literal
+  keyword search.
+- `--regex-mode` selects the regex syntax: `ecmascript` (default),
+  `awk`, `grep`, `egrep`.
+- New module `rockyou.regex_engine.cppm` handles compilation, matching,
+  and a hybrid fast path (Boyer-Moore prefix rejection + regex
+  verification).
+- `SearchFileRegex` integrates regex into the parallel search pipeline
+  with chunk-overlap streaming.
+- JSON output includes `regex` and `regex_mode` fields.
+- 17 new regex tests covering character classes, quantifiers,
+  anchors, alternation, and all four syntax modes.
+
 ## [0.5.0] - 2026-06-28
 
 ### Concurrency overhaul

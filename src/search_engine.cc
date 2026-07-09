@@ -669,6 +669,7 @@ std::expected<SearchResult, rockyou::AppError> SearchFileRegex(const std::string
 } // namespace
 
 Result<void> SearchZip(const std::string& path, const std::string& keyword, const SearchOptions& options) {
+  const auto t0 = std::chrono::high_resolution_clock::now();
   if (keyword.empty()) {
     return std::unexpected(MakeError(ErrorCode::InvalidInput, std::string(kKeywordEmptyError)));
   }
@@ -731,7 +732,7 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
     LowerInPlace(&pattern_storage);
   }
   const std::string_view pattern = pattern_storage;
-  const auto start_time = std::chrono::high_resolution_clock::now();
+  const auto t1 = std::chrono::high_resolution_clock::now();
   unsigned int thread_count = options.thread_count.value_or(std::thread::hardware_concurrency());
   if (thread_count == 0) {
     thread_count = kDefaultThreadCountFallback;
@@ -801,18 +802,20 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
   }
   completion_latch.wait();
   workers.clear();
-  const auto end_time = std::chrono::high_resolution_clock::now();
-  const std::chrono::duration<double> elapsed = end_time - start_time;
+  const auto t2 = std::chrono::high_resolution_clock::now();
+  const std::chrono::duration<double> elapsed = t2 - t1;
 
   std::vector<SearchResult> finalized;
   finalized.reserve(results.size());
   int total_occurrences = 0;
-  for (auto& slot : results) {
-    if (!slot.has_value()) {
+  size_t bytes_decompressed = 0;
+  for (size_t i = 0; i < results.size(); ++i) {
+    if (!results[i].has_value()) {
       continue;
     }
-    total_occurrences += static_cast<int>(slot->occurrences.size());
-    finalized.push_back(std::move(slot).value());
+    total_occurrences += static_cast<int>(results[i]->occurrences.size());
+    bytes_decompressed += entries[i].second.size;
+    finalized.push_back(std::move(results[i]).value());
   }
 
   std::vector<std::string> error_messages;
@@ -870,7 +873,13 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
 
   const bool partial_failure = !error_messages.empty();
 
-  if (options.json) {
+  if (options.count) {
+    if (options.json) {
+      std::println("{{\"total\":{}}}", total_after_limit);
+    } else {
+      std::println("{}", total_after_limit);
+    }
+  } else if (options.json) {
     std::string json_output =
         BuildJson(finalized, total_after_limit, truncated_global, error_messages, options, partial_failure);
     if (json_output.empty()) {
@@ -906,6 +915,42 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
     std::println(kTimeTakenFormat, elapsed.count());
     if (truncated_global) {
       std::println("{}", rockyou::kResultsTruncatedMessage);
+    }
+  }
+
+  if (options.stats) {
+    const auto t3 = std::chrono::high_resolution_clock::now();
+    const std::chrono::duration<double, std::milli> init_ms = t1 - t0;
+    const std::chrono::duration<double, std::milli> search_ms = t2 - t1;
+    const std::chrono::duration<double, std::milli> finalize_ms = t3 - t2;
+    const std::chrono::duration<double, std::milli> total_ms = t3 - t0;
+    const double search_seconds = elapsed.count();
+    const double throughput_mbps =
+        search_seconds > 0.0
+            ? static_cast<double>(bytes_decompressed) / (search_seconds * 1024.0 * 1024.0)
+            : 0.0;
+    const size_t searched_count = finalized.size();
+    const size_t skipped_count = entries.size() - searched_count;
+
+    std::println(stderr, "--- Statistics ---");
+    std::println(stderr, "Entries: {} total, {} searched, {} skipped, {} errors", entries.size(),
+                 searched_count, skipped_count, error_messages.size());
+    std::println(stderr, "Bytes decompressed: {}", bytes_decompressed);
+    std::println(stderr, "Timing: init={:.1f}ms search={:.1f}ms finalize={:.1f}ms total={:.1f}ms",
+                 init_ms.count(), search_ms.count(), finalize_ms.count(), total_ms.count());
+    std::println(stderr, "Throughput: {:.1f} MB/s", throughput_mbps);
+
+    std::vector<std::pair<std::string_view, size_t>> top_entries;
+    for (const auto& r : finalized) {
+      top_entries.emplace_back(r.filename, r.occurrences.size());
+    }
+    const size_t top_n = std::min(top_entries.size(), static_cast<size_t>(5));
+    std::partial_sort(top_entries.begin(), top_entries.begin() + static_cast<std::ptrdiff_t>(top_n),
+                      top_entries.end(),
+                      [](const auto& a, const auto& b) { return a.second > b.second; });
+    std::println(stderr, "Top entries by hits:");
+    for (size_t i = 0; i < top_n; ++i) {
+      std::println(stderr, "  {}. {} ({} hits)", i + 1, top_entries[i].first, top_entries[i].second);
     }
   }
 

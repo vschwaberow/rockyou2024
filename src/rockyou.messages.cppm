@@ -13,6 +13,8 @@ inline constexpr std::string_view kInteractiveFlag = "--interactive";
 inline constexpr std::string_view kCaseInsensitiveFlag = "-i";
 inline constexpr std::string_view kQuietFlag = "--quiet";
 inline constexpr std::string_view kJsonFlag = "--json";
+inline constexpr std::string_view kCountFlag = "--count";
+inline constexpr std::string_view kStatsFlag = "--stats";
 inline constexpr std::string_view kLimitFlag = "--limit";
 inline constexpr std::string_view kPerFileLimitFlag = "--per-file-limit";
 inline constexpr std::string_view kThreadsFlag = "--threads";
@@ -39,6 +41,8 @@ inline constexpr std::string_view kUsageInteractiveOption = "  --interactive    
 inline constexpr std::string_view kUsageCaseInsensitiveOption = "  -i               Perform case-insensitive search";
 inline constexpr std::string_view kUsageQuietOption = "  --quiet          Suppress headers/timing; emit matches only";
 inline constexpr std::string_view kUsageJsonOption = "  --json           Emit results as JSON with ordering";
+inline constexpr std::string_view kUsageCountOption = "  --count          Print only the total match count";
+inline constexpr std::string_view kUsageStatsOption = "  --stats          Print search statistics to stderr";
 inline constexpr std::string_view kUsageLimitOption =
     "  --limit N        Cap total matches to N (indicates truncation)";
 inline constexpr std::string_view kUsagePerFileLimitOption =
@@ -105,7 +109,7 @@ inline constexpr std::string_view kPromptEnterRegexMode =
     "Enter regex mode (ecmascript/awk/grep/egrep, or leave blank for default): ";
 
 inline constexpr std::string_view kProjectName = "rockyou2024";
-inline constexpr std::string_view kProjectVersion = "0.6.0";
+inline constexpr std::string_view kProjectVersion = "0.7.0";
 inline constexpr std::string_view kProjectAuthor = "Volker Schwaberow <volker@schwaberow.de>";
 inline constexpr std::string_view kProjectLicense = "MIT";
 

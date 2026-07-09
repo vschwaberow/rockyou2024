@@ -9,17 +9,17 @@ Prebuilt archives ship with each GitHub release. Download the one that matches y
 ### Linux / macOS
 
 ```bash
-download_url=https://github.com/vschwaberow/rockyou2024/releases/download/v0.6.0/search-linux-v0.6.0.zip
+download_url=https://github.com/vschwaberow/rockyou2024/releases/download/v0.7.0/search-linux-v0.7.0.zip
 curl -LO "$download_url"
-unzip search-linux-v0.6.0.zip -d rockyou2024-linux
+unzip search-linux-v0.7.0.zip -d rockyou2024-linux
 ```
 
-Replace the URL with the macOS package when needed (`https://github.com/vschwaberow/rockyou2024/releases/download/v0.6.0/search-macos-v0.6.0.zip`).
+Replace the URL with the macOS package when needed (`https://github.com/vschwaberow/rockyou2024/releases/download/v0.7.0/search-macos-v0.7.0.zip`).
 
 ### Windows
 
 ```powershell
-Invoke-WebRequest -Uri https://github.com/vschwaberow/rockyou2024/releases/download/v0.6.0/search-windows-v0.6.0.zip -OutFile search-windows-v0.6.0.zip
+Invoke-WebRequest -Uri https://github.com/vschwaberow/rockyou2024/releases/download/v0.7.0/search-windows-v0.7.0.zip -OutFile search-windows-v0.7.0.zip
 Expand-Archive -Path search-windows-v0.6.0.zip -DestinationPath rockyou2024-windows
 ```
 
@@ -28,7 +28,7 @@ Expand-Archive -Path search-windows-v0.6.0.zip -DestinationPath rockyou2024-wind
 From the extracted folder:
 
 ```bash
-./search <zip_file> <keyword> [-i] [--quiet|--json] [--limit N] [--per-file-limit N] [--threads N] [--chunk BYTES] [--context CHARS] [--checksum sha256:HEX|blake3:HEX] [--highlight] [--regex] [--regex-mode MODE]
+./search <zip_file> <keyword> [-i] [--quiet|--json] [--count] [--stats] [--limit N] [--per-file-limit N] [--threads N] [--chunk BYTES] [--context CHARS] [--checksum sha256:HEX|blake3:HEX] [--highlight] [--regex] [--regex-mode MODE]
 ./search --interactive
 ```
 
@@ -36,7 +36,7 @@ PowerShell is similar:
 
 ```powershell
 .
-search.exe <zip_file> <keyword> [-i] [--quiet|--json] [--limit N] [--per-file-limit N] [--threads N] [--chunk BYTES] [--context CHARS] [--checksum sha256:HEX|blake3:HEX] [--highlight] [--regex] [--regex-mode MODE]
+search.exe <zip_file> <keyword> [-i] [--quiet|--json] [--count] [--stats] [--limit N] [--per-file-limit N] [--threads N] [--chunk BYTES] [--context CHARS] [--checksum sha256:HEX|blake3:HEX] [--highlight] [--regex] [--regex-mode MODE]
 .
 search.exe --interactive
 ```
@@ -65,6 +65,27 @@ Enable regex mode with `--regex` to search for patterns instead of literal keywo
 ```
 
 Supported regex modes: `ecmascript` (default), `awk`, `grep`, `egrep`
+
+## Count mode
+
+Use `--count` to print only the total number of matches — no context, no details:
+
+```bash
+./search rockyou2024.zip password123 --count           # prints a number
+./search rockyou2024.zip password123 --count --json    # prints {"total":N}
+```
+
+## Statistics
+
+Use `--stats` to print search statistics to stderr (stdout output is unaffected):
+
+```bash
+./search rockyou2024.zip password123 --stats
+./search rockyou2024.zip password123 --json --stats      # JSON to stdout, stats to stderr
+```
+
+The stats block includes entries searched/skipped/errored, bytes decompressed,
+per-phase timing, throughput in MB/s, and a top-5 entries ranking.
 
 ## Build it yourself
 

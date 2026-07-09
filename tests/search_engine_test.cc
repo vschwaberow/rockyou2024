@@ -168,6 +168,60 @@ TEST(SearchEngineTest, SearchZipQuietModeProducesCompactLines) {
   EXPECT_EQ(output.find("Occurrences in"), std::string::npos);
 }
 
+TEST(SearchEngineTest, SearchZipCountModeOutputsOnlyNumber) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.count = true;
+  options.case_insensitive = true;
+  const auto res = rockyou::SearchZip(TestDataPath("sample.zip").string(), "password123", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(res.has_value());
+  EXPECT_EQ(output, "2\n");
+}
+
+TEST(SearchEngineTest, SearchZipCountModeWithJsonOutputsTotalObject) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.count = true;
+  options.json = true;
+  options.case_insensitive = true;
+  const auto res = rockyou::SearchZip(TestDataPath("sample.zip").string(), "password123", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(res.has_value());
+  EXPECT_EQ(output, "{\"total\":2}\n");
+}
+
+TEST(SearchEngineTest, SearchZipStatsModeOutputsStatsToStderr) {
+  testing::internal::CaptureStdout();
+  testing::internal::CaptureStderr();
+  rockyou::SearchOptions options;
+  options.stats = true;
+  options.case_insensitive = true;
+  const auto res = rockyou::SearchZip(TestDataPath("sample.zip").string(), "password123", options);
+  const std::string stderr_output = testing::internal::GetCapturedStderr();
+  testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(res.has_value());
+  EXPECT_NE(stderr_output.find("--- Statistics ---"), std::string::npos);
+  EXPECT_NE(stderr_output.find("Entries:"), std::string::npos);
+  EXPECT_NE(stderr_output.find("Bytes decompressed:"), std::string::npos);
+  EXPECT_NE(stderr_output.find("Timing:"), std::string::npos);
+  EXPECT_NE(stderr_output.find("Throughput:"), std::string::npos);
+  EXPECT_NE(stderr_output.find("Top entries by hits:"), std::string::npos);
+  EXPECT_NE(stderr_output.find("common.txt"), std::string::npos);
+}
+
+TEST(SearchEngineTest, SearchZipStatsModeDoesNotPolluteStdout) {
+  testing::internal::CaptureStdout();
+  testing::internal::CaptureStderr();
+  rockyou::SearchOptions options;
+  options.stats = true;
+  const auto res = rockyou::SearchZip(TestDataPath("sample.zip").string(), "password123", options);
+  const std::string stdout_output = testing::internal::GetCapturedStdout();
+  testing::internal::GetCapturedStderr();
+  ASSERT_TRUE(res.has_value());
+  EXPECT_EQ(stdout_output.find("--- Statistics ---"), std::string::npos);
+}
+
 TEST(SearchEngineTest, SearchZipHighlightInsertsBracketsInContext) {
   testing::internal::CaptureStdout();
   rockyou::SearchOptions options;
