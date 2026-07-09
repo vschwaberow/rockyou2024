@@ -37,6 +37,7 @@ struct SearchOptions {
   bool quiet = false;
   bool json = false;
   bool count = false;
+  bool stats = false;
   bool highlight = false;
   bool regex = false;
   std::optional<int> limit;

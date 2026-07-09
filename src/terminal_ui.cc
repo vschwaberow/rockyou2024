@@ -40,6 +40,7 @@ void PrintUsage(const std::string& program_name) {
   std::println(kUsageQuietOption);
   std::println(kUsageJsonOption);
   std::println(kUsageCountOption);
+  std::println(kUsageStatsOption);
   std::println(kUsageLimitOption);
   std::println(kUsagePerFileLimitOption);
   std::println(kUsageThreadsOption);
