@@ -870,7 +870,13 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
 
   const bool partial_failure = !error_messages.empty();
 
-  if (options.json) {
+  if (options.count) {
+    if (options.json) {
+      std::println("{{\"total\":{}}}", total_after_limit);
+    } else {
+      std::println("{}", total_after_limit);
+    }
+  } else if (options.json) {
     std::string json_output =
         BuildJson(finalized, total_after_limit, truncated_global, error_messages, options, partial_failure);
     if (json_output.empty()) {

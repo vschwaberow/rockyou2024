@@ -168,6 +168,29 @@ TEST(SearchEngineTest, SearchZipQuietModeProducesCompactLines) {
   EXPECT_EQ(output.find("Occurrences in"), std::string::npos);
 }
 
+TEST(SearchEngineTest, SearchZipCountModeOutputsOnlyNumber) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.count = true;
+  options.case_insensitive = true;
+  const auto res = rockyou::SearchZip(TestDataPath("sample.zip").string(), "password123", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(res.has_value());
+  EXPECT_EQ(output, "2\n");
+}
+
+TEST(SearchEngineTest, SearchZipCountModeWithJsonOutputsTotalObject) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.count = true;
+  options.json = true;
+  options.case_insensitive = true;
+  const auto res = rockyou::SearchZip(TestDataPath("sample.zip").string(), "password123", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(res.has_value());
+  EXPECT_EQ(output, "{\"total\":2}\n");
+}
+
 TEST(SearchEngineTest, SearchZipHighlightInsertsBracketsInContext) {
   testing::internal::CaptureStdout();
   rockyou::SearchOptions options;

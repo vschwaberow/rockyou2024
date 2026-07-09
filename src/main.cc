@@ -95,6 +95,8 @@ int main(int argc, char* argv[]) {
         options.quiet = true;
       } else if (arg == rockyou::kJsonFlag) {
         options.json = true;
+      } else if (arg == rockyou::kCountFlag) {
+        options.count = true;
       } else if (arg == rockyou::kHighlightFlag) {
         options.highlight = true;
       } else if (arg == rockyou::kRegexFlag) {
