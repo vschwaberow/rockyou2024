@@ -34,13 +34,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ninja-build clang libssl-dev
+          sudo apt-get install -y ninja-build g++-14 libssl-dev
 
       - name: macOS packages
         if: runner.os == 'macOS'
         run: |
-          brew install ninja llvm openssl@3
-          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+          brew install ninja openssl@3
           echo "CMAKE_PREFIX_PATH=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
 
       - name: Windows packages
@@ -55,16 +54,20 @@ jobs:
         shell: bash
         run: |
           extra=()
+          extra+=(-DMZ_BZIP2=OFF)
           if [ -n "${CMAKE_PREFIX_PATH:-}" ]; then
             extra+=(-DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH")
           fi
           if [ -n "${OPENSSL_ROOT_DIR:-}" ]; then
             extra+=(-DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR")
           fi
+          if [ "${RUNNER_OS}" = "Linux" ]; then
+            extra+=(-DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14)
+          else
+            extra+=(-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++)
+          fi
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER=clang \
-            -DCMAKE_CXX_COMPILER=clang++ \
             "${extra[@]}"
 
       - name: Build

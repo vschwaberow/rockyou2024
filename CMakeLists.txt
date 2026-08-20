@@ -53,6 +53,8 @@ function(fetch_if_not_exists name git_repo git_tag)
   endif()
 endfunction()
 
+set(MZ_BZIP2 OFF CACHE BOOL "" FORCE)
+
 fetch_if_not_exists(minizip
   https://github.com/nmoinvaz/minizip.git
   4.0.7
@@ -129,7 +131,7 @@ target_compile_options(search PRIVATE
   $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion -Werror -Wno-unused-function -Wno-deprecated-declarations -Wno-sign-conversion -Wno-redundant-move>
 )
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT APPLE)
   target_link_options(search PRIVATE $<$<CONFIG:Release>:-s>)
 endif()
 
