@@ -8,7 +8,7 @@
   GitHub release uploads each platform zip and the `search` binary as
   assets without waiting on the other operating systems.
 - Linux CI builds with GCC 14 so `std::expected` is available. macOS uses
-  AppleClang (Homebrew LLVM linked against the SDK libc++). minizip bzip2
+  AppleClang via xcrun, not Homebrew LLVM. minizip bzip2
   fetch is off so Windows configure does not hit sourceware.org.
 
 ## [0.8.0] - 2026-08-20

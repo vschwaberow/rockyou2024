@@ -63,6 +63,9 @@ jobs:
           fi
           if [ "${RUNNER_OS}" = "Linux" ]; then
             extra+=(-DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14)
+          elif [ "${RUNNER_OS}" = "macOS" ]; then
+            extra+=(-DCMAKE_C_COMPILER="$(xcrun --find clang)"
+                    -DCMAKE_CXX_COMPILER="$(xcrun --find clang++)")
           else
             extra+=(-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++)
           fi
