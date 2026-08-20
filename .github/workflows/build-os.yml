@@ -34,7 +34,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ninja-build g++-14 libssl-dev
+          sudo apt-get install -y ninja-build clang g++-14 libstdc++-14-dev libssl-dev
 
       - name: macOS packages
         if: runner.os == 'macOS'
@@ -62,7 +62,10 @@ jobs:
             extra+=(-DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR")
           fi
           if [ "${RUNNER_OS}" = "Linux" ]; then
-            extra+=(-DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14)
+            gcc_dir="$(gcc-14 -print-search-dirs | sed -n 's/^install: *//p')"
+            extra+=(-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+                    -DCMAKE_C_FLAGS="--gcc-install-dir=${gcc_dir}"
+                    -DCMAKE_CXX_FLAGS="--gcc-install-dir=${gcc_dir}")
           elif [ "${RUNNER_OS}" = "macOS" ]; then
             extra+=(-DCMAKE_C_COMPILER="$(xcrun --find clang)"
                     -DCMAKE_CXX_COMPILER="$(xcrun --find clang++)")
