@@ -2,14 +2,19 @@
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-08-20
+
 ### CI
 
 - Linux, macOS, and Windows builds run as independent jobs. A published
   GitHub release uploads each platform zip and the `search` binary as
   assets without waiting on the other operating systems.
-- Linux CI uses Clang with GCC 14 libstdc++ so `std::expected` is available. macOS uses
-  Homebrew LLVM plus its own libc++ (AppleClang has no C++26 in CMake 3.30). minizip bzip2
-  fetch is off so Windows configure does not hit sourceware.org.
+- Linux CI uses LLVM 20 from apt.llvm.org for C++26 module support.
+- macOS links against Homebrew LLVM libc++ (`-lc++`, `-lunwind`).
+- Windows uses the Chocolatey OpenSSL install path and skips minizip
+  install rules so configure does not fail on alias targets.
+- minizip bzip2 fetch is off so Windows configure does not hit sourceware.org.
+- Release Drafter workflow removed so pushes no longer open draft releases.
 
 ## [0.8.0] - 2026-08-20
 

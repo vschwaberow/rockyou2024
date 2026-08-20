@@ -109,7 +109,7 @@ inline constexpr std::string_view kPromptEnterRegexMode =
     "Enter regex mode (ecmascript/awk/grep/egrep, or leave blank for default): ";
 
 inline constexpr std::string_view kProjectName = "rockyou2024";
-inline constexpr std::string_view kProjectVersion = "0.8.0";
+inline constexpr std::string_view kProjectVersion = "0.8.1";
 inline constexpr std::string_view kProjectAuthor = "Volker Schwaberow <volker@schwaberow.de>";
 inline constexpr std::string_view kProjectLicense = "MIT";
 
