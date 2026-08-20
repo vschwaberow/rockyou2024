@@ -650,4 +650,25 @@ TEST(RegexEngineTest, RegexSearchWithPerFileLimit) {
   EXPECT_NE(output.find("truncated"), std::string::npos);
 }
 
+
+TEST(RegexEngineTest, RegexSearchWithLiteralPrefixFindsMatch) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "password123", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);
+}
+
+TEST(RegexEngineTest, RegexSearchWithoutLiteralPrefixFindsSameMatch) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "[a-z]+123", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);
+}
+
 } // namespace

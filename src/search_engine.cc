@@ -110,20 +110,10 @@ std::vector<size_t> SearchPositions(std::string_view text, std::string_view patt
   return BoyerMoore(lowered, pattern);
 }
 
-std::vector<size_t> SearchPositionsRegex(std::string_view text, const RegexPattern& regex_pattern) {
-  std::vector<size_t> positions;
-  auto matches = RegexSearchAll(regex_pattern, text);
-  positions.reserve(matches.size());
-  for (const auto& match : matches) {
-    positions.push_back(match.position);
-  }
-  return positions;
-}
-
-std::vector<size_t> SearchPositionsHybrid(std::string_view text, const RegexPattern& regex_pattern) {
+std::vector<RegexMatch> SearchMatchesHybrid(std::string_view text, const RegexPattern& regex_pattern) {
   std::string literal_prefix = GetLiteralPrefixForFastPath(regex_pattern);
   if (literal_prefix.empty() || literal_prefix.length() < 3) {
-    return SearchPositionsRegex(text, regex_pattern);
+    return RegexSearchAll(regex_pattern, text);
   }
 
   std::vector<size_t> candidates;
@@ -135,8 +125,8 @@ std::vector<size_t> SearchPositionsHybrid(std::string_view text, const RegexPatt
     candidates = BoyerMoore(lowered, prefix_lower);
   }
 
-  std::vector<size_t> verified_positions;
-  verified_positions.reserve(candidates.size());
+  std::vector<RegexMatch> verified;
+  verified.reserve(candidates.size());
 
   for (size_t candidate_pos : candidates) {
     size_t scan_start = candidate_pos > 100 ? candidate_pos - 100 : 0;
@@ -144,17 +134,30 @@ std::vector<size_t> SearchPositionsHybrid(std::string_view text, const RegexPatt
     std::string_view scan_window = text.substr(scan_start, scan_end - scan_start);
 
     auto matches = RegexSearchAll(regex_pattern, scan_window);
+    const size_t accept_lo = candidate_pos > 50 ? candidate_pos - 50 : 0;
+    const size_t accept_hi = candidate_pos + 150;
     for (const auto& match : matches) {
       size_t absolute_pos = scan_start + match.position;
-      if (absolute_pos >= candidate_pos - 50 && absolute_pos < candidate_pos + 150) {
-        verified_positions.push_back(absolute_pos);
+      if (absolute_pos >= accept_lo && absolute_pos < accept_hi) {
+        verified.push_back(RegexMatch{.position = absolute_pos,
+                                      .length = match.length,
+                                      .matched_text = match.matched_text});
       }
     }
   }
 
-  std::sort(verified_positions.begin(), verified_positions.end());
-  verified_positions.erase(std::unique(verified_positions.begin(), verified_positions.end()), verified_positions.end());
-  return verified_positions;
+  std::sort(verified.begin(), verified.end(), [](const RegexMatch& a, const RegexMatch& b) {
+    if (a.position != b.position) {
+      return a.position < b.position;
+    }
+    return a.length < b.length;
+  });
+  verified.erase(std::unique(verified.begin(), verified.end(),
+                             [](const RegexMatch& a, const RegexMatch& b) {
+                               return a.position == b.position && a.length == b.length;
+                             }),
+                 verified.end());
+  return verified;
 }
 
 void AppendNewlines(std::string_view chunk, size_t base_offset, std::vector<size_t>* newline_offsets) {
@@ -596,7 +599,7 @@ std::expected<SearchResult, rockyou::AppError> SearchFileRegex(const std::string
     std::vector<size_t> newline_offsets;
     AppendNewlines(buffer, 0, &newline_offsets);
 
-    const auto matches = RegexSearchAll(regex_pattern, buffer);
+    const auto matches = SearchMatchesHybrid(buffer, regex_pattern);
     for (const auto& match : matches) {
       const auto line_column = ComputeLineColumn(newline_offsets, match.position);
       const std::string context =
@@ -632,7 +635,7 @@ std::expected<SearchResult, rockyou::AppError> SearchFileRegex(const std::string
     const size_t base = processed >= prefix_length ? processed - prefix_length : 0;
     std::string search_text = overlap + chunk;
 
-    const auto matches = RegexSearchAll(regex_pattern, search_text);
+    const auto matches = SearchMatchesHybrid(search_text, regex_pattern);
     const size_t threshold = processed >= prefix_length ? processed - prefix_length : 0;
 
     for (const auto& match : matches) {

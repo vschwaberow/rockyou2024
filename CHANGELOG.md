@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Search
+
+- Regex search now uses the Boyer-Moore literal-prefix fast path in
+  `SearchFileRegex` (full-buffer and chunked reads). Accept-window
+  offsets use saturating subtraction so matches near the start of a
+  buffer are kept.
+
 ## [0.7.0] - 2026-07-09
 
 ### New output modes
