@@ -118,7 +118,9 @@ target_compile_options(search_core PUBLIC
   $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion -Werror -Wno-unused-function -Wno-deprecated-declarations -Wno-sign-conversion -Wno-redundant-move>
 )
 
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+if(NOT APPLE)
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+endif()
 
 if(USE_SANITIZERS)
   target_compile_options(search_core PUBLIC -fsanitize=${USE_SANITIZERS} -fno-omit-frame-pointer)

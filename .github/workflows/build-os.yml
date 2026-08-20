@@ -39,7 +39,7 @@ jobs:
       - name: macOS packages
         if: runner.os == 'macOS'
         run: |
-          brew install ninja openssl@3
+          brew install ninja llvm openssl@3
           echo "CMAKE_PREFIX_PATH=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
 
       - name: Windows packages
@@ -67,8 +67,16 @@ jobs:
                     -DCMAKE_C_FLAGS="--gcc-install-dir=${gcc_dir}"
                     -DCMAKE_CXX_FLAGS="--gcc-install-dir=${gcc_dir}")
           elif [ "${RUNNER_OS}" = "macOS" ]; then
-            extra+=(-DCMAKE_C_COMPILER="$(xcrun --find clang)"
-                    -DCMAKE_CXX_COMPILER="$(xcrun --find clang++)")
+            llvm="$(brew --prefix llvm)"
+            libcxx="${llvm}/lib/c++"
+            if [ ! -d "${libcxx}" ]; then
+              libcxx="${llvm}/lib"
+            fi
+            extra+=(-DCMAKE_C_COMPILER="${llvm}/bin/clang"
+                    -DCMAKE_CXX_COMPILER="${llvm}/bin/clang++"
+                    -DCMAKE_CXX_FLAGS="-stdlib=libc++"
+                    -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++ -L${libcxx} -Wl,-rpath,${libcxx}"
+                    -DCMAKE_SHARED_LINKER_FLAGS="-stdlib=libc++ -L${libcxx} -Wl,-rpath,${libcxx}")
           else
             extra+=(-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++)
           fi
