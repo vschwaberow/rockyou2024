@@ -34,7 +34,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ninja-build clang g++-14 libstdc++-14-dev libssl-dev
+          sudo apt-get install -y ninja-build libssl-dev wget gnupg
+          wget -q https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 20
+          echo "CC=clang-20" >> "$GITHUB_ENV"
+          echo "CXX=clang++-20" >> "$GITHUB_ENV"
 
       - name: macOS packages
         if: runner.os == 'macOS'
@@ -48,7 +53,7 @@ jobs:
         run: |
           choco install ninja llvm openssl -y --no-progress
           echo "C:/Program Files/LLVM/bin" >> "$GITHUB_PATH"
-          echo "OPENSSL_ROOT_DIR=C:/Program Files/OpenSSL-Win64" >> "$GITHUB_ENV"
+          echo "OPENSSL_ROOT_DIR=C:/Program Files/OpenSSL" >> "$GITHUB_ENV"
 
       - name: Configure
         shell: bash
@@ -62,21 +67,21 @@ jobs:
             extra+=(-DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR")
           fi
           if [ "${RUNNER_OS}" = "Linux" ]; then
-            gcc_dir="$(gcc-14 -print-search-dirs | sed -n 's/^install: *//p')"
-            extra+=(-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-                    -DCMAKE_C_FLAGS="--gcc-install-dir=${gcc_dir}"
-                    -DCMAKE_CXX_FLAGS="--gcc-install-dir=${gcc_dir}")
+            extra+=(-DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20)
           elif [ "${RUNNER_OS}" = "macOS" ]; then
             llvm="$(brew --prefix llvm)"
             libcxx="${llvm}/lib/c++"
             if [ ! -d "${libcxx}" ]; then
               libcxx="${llvm}/lib"
             fi
+            cxx_inc="${llvm}/include/c++/v1"
+            link_flags="-stdlib=libc++ -L${libcxx} -Wl,-rpath,${libcxx} -lc++ -lunwind"
             extra+=(-DCMAKE_C_COMPILER="${llvm}/bin/clang"
                     -DCMAKE_CXX_COMPILER="${llvm}/bin/clang++"
-                    -DCMAKE_CXX_FLAGS="-stdlib=libc++"
-                    -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++ -L${libcxx} -Wl,-rpath,${libcxx}"
-                    -DCMAKE_SHARED_LINKER_FLAGS="-stdlib=libc++ -L${libcxx} -Wl,-rpath,${libcxx}")
+                    -DCMAKE_CXX_FLAGS="-stdlib=libc++ -isystem ${cxx_inc}"
+                    -DCMAKE_EXE_LINKER_FLAGS="${link_flags}"
+                    -DCMAKE_SHARED_LINKER_FLAGS="${link_flags}"
+                    -DCMAKE_MODULE_LINKER_FLAGS="${link_flags}")
           else
             extra+=(-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++)
           fi

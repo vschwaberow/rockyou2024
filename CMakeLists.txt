@@ -54,6 +54,8 @@ function(fetch_if_not_exists name git_repo git_tag)
 endfunction()
 
 set(MZ_BZIP2 OFF CACHE BOOL "" FORCE)
+set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
+set(MZ_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 
 fetch_if_not_exists(minizip
   https://github.com/nmoinvaz/minizip.git
