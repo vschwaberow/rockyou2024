@@ -311,6 +311,51 @@ TEST(SearchEngineTest, SearchZipPerFileLimitAffectsResults) {
   EXPECT_NE(output.find("\"per_file_limit\":1"), std::string::npos);
 }
 
+
+TEST(SearchEngineTest, ZipArchiveReusesHandleAcrossEntries) {
+  const auto index_res = rockyou::BuildZipIndex(TestDataPath("sample.zip").string());
+  ASSERT_TRUE(index_res.has_value()) << index_res.error().message;
+  const auto& index = *index_res;
+  auto common = index.find("common.txt");
+  auto nested = index.find("nested/other.txt");
+  ASSERT_NE(common, index.end());
+  ASSERT_NE(nested, index.end());
+
+  auto archive_or = rockyou::ZipArchive::Open(TestDataPath("sample.zip").string());
+  ASSERT_TRUE(archive_or.has_value()) << archive_or.error().message;
+  auto& archive = *archive_or;
+
+  ASSERT_TRUE(archive.OpenEntry(common->first, common->second).has_value());
+  std::string first(common->second.size, '\0');
+  size_t total = 0;
+  while (total < first.size()) {
+    auto n = archive.Read(first.data() + total, static_cast<unsigned int>(first.size() - total));
+    ASSERT_TRUE(n.has_value()) << n.error().message;
+    if (*n == 0) {
+      break;
+    }
+    total += static_cast<size_t>(*n);
+  }
+  first.resize(total);
+  ASSERT_TRUE(archive.CloseEntryWithStatus().has_value());
+  EXPECT_NE(first.find("password123"), std::string::npos);
+
+  ASSERT_TRUE(archive.OpenEntry(nested->first, nested->second).has_value());
+  std::string second(nested->second.size, '\0');
+  total = 0;
+  while (total < second.size()) {
+    auto n = archive.Read(second.data() + total, static_cast<unsigned int>(second.size() - total));
+    ASSERT_TRUE(n.has_value()) << n.error().message;
+    if (*n == 0) {
+      break;
+    }
+    total += static_cast<size_t>(*n);
+  }
+  second.resize(total);
+  ASSERT_TRUE(archive.CloseEntryWithStatus().has_value());
+  EXPECT_NE(second.find("PASSWORD123"), std::string::npos);
+}
+
 TEST(SearchEngineTest, ZipEntryStreamCreateAndReadFullContent) {
   const auto index_res = rockyou::BuildZipIndex(TestDataPath("sample.zip").string());
   ASSERT_TRUE(index_res.has_value());

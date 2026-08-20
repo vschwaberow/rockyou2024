@@ -27,6 +27,31 @@ using ZipIndex = std::map<std::string, ZipIndexEntry>;
 
 Result<ZipIndex> BuildZipIndex(const std::string& path);
 
+class ZipArchive {
+public:
+  ZipArchive(const ZipArchive&) = delete;
+  ZipArchive& operator=(const ZipArchive&) = delete;
+  ZipArchive(ZipArchive&& other) noexcept;
+  ZipArchive& operator=(ZipArchive&& other) noexcept;
+  ~ZipArchive();
+
+  static Result<ZipArchive> Open(const std::string& path);
+
+  Result<void> OpenEntry(const std::string& name, const ZipIndexEntry& entry);
+  std::expected<int, rockyou::AppError> Read(char* buffer, unsigned int length);
+  std::expected<void, rockyou::AppError> CloseEntryWithStatus();
+  size_t size() const { return size_; }
+
+private:
+  explicit ZipArchive(unzFile handle);
+
+  void CloseEntry();
+
+  unzFile handle_;
+  size_t size_{0};
+  bool entry_open_{false};
+};
+
 class ZipEntryStream {
 public:
   ZipEntryStream(const ZipEntryStream&) = delete;

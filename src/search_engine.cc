@@ -471,14 +471,13 @@ std::expected<void, rockyou::AppError> ValidateChecksum(const std::string& path,
 }
 
 std::expected<SearchResult, rockyou::AppError>
-SearchFile(const std::string& path, const std::string& name, const ZipIndexEntry& entry, const std::string& keyword,
+SearchFile(ZipArchive& archive, const std::string& name, const ZipIndexEntry& entry, const std::string& keyword,
            std::string_view pattern, bool case_insensitive, size_t chunk_size, size_t context_size,
            size_t min_buffer_size, std::optional<int> per_file_limit, bool highlight) {
-  auto stream_or = ZipEntryStream::Create(path, name, entry);
-  if (!stream_or) {
-    return std::unexpected(stream_or.error());
+  auto open_res = archive.OpenEntry(name, entry);
+  if (!open_res) {
+    return std::unexpected(open_res.error());
   }
-  ZipEntryStream stream = *std::move(stream_or);
   SearchResult result;
   result.filename = name;
   if (keyword.empty()) {
@@ -490,7 +489,7 @@ SearchFile(const std::string& path, const std::string& name, const ZipIndexEntry
     size_t total = 0;
     while (total < buffer.size()) {
       const size_t remaining = buffer.size() - total;
-      auto read_or = stream.Read(buffer.data() + total, static_cast<unsigned int>(remaining));
+      auto read_or = archive.Read(buffer.data() + total, static_cast<unsigned int>(remaining));
       if (!read_or) {
         return std::unexpected(read_or.error());
       }
@@ -520,7 +519,7 @@ SearchFile(const std::string& path, const std::string& name, const ZipIndexEntry
   std::string overlap;
   size_t processed = 0;
   while (true) {
-    auto read_or = stream.Read(buffer.data(), static_cast<unsigned int>(buffer.size()));
+    auto read_or = archive.Read(buffer.data(), static_cast<unsigned int>(buffer.size()));
     if (!read_or) {
       return std::unexpected(read_or.error());
     }
@@ -560,23 +559,22 @@ SearchFile(const std::string& path, const std::string& name, const ZipIndexEntry
       }
     }
   }
-  auto close_status = stream.CloseWithStatus();
+  auto close_status = archive.CloseEntryWithStatus();
   if (!close_status) {
     return std::unexpected(close_status.error());
   }
   return result;
 }
 
-std::expected<SearchResult, rockyou::AppError> SearchFileRegex(const std::string& path, const std::string& name,
+std::expected<SearchResult, rockyou::AppError> SearchFileRegex(ZipArchive& archive, const std::string& name,
                                                                const ZipIndexEntry& entry,
                                                                const RegexPattern& regex_pattern, size_t chunk_size,
                                                                size_t context_size, size_t min_buffer_size,
                                                                std::optional<int> per_file_limit, bool highlight) {
-  auto stream_or = ZipEntryStream::Create(path, name, entry);
-  if (!stream_or) {
-    return std::unexpected(stream_or.error());
+  auto open_res = archive.OpenEntry(name, entry);
+  if (!open_res) {
+    return std::unexpected(open_res.error());
   }
-  ZipEntryStream stream = *std::move(stream_or);
   SearchResult result;
   result.filename = name;
 
@@ -585,7 +583,7 @@ std::expected<SearchResult, rockyou::AppError> SearchFileRegex(const std::string
     size_t total = 0;
     while (total < buffer.size()) {
       const size_t remaining = buffer.size() - total;
-      auto read_or = stream.Read(buffer.data() + total, static_cast<unsigned int>(remaining));
+      auto read_or = archive.Read(buffer.data() + total, static_cast<unsigned int>(remaining));
       if (!read_or) {
         return std::unexpected(read_or.error());
       }
@@ -619,7 +617,7 @@ std::expected<SearchResult, rockyou::AppError> SearchFileRegex(const std::string
   size_t processed = 0;
 
   while (true) {
-    auto read_or = stream.Read(buffer.data(), static_cast<unsigned int>(buffer.size()));
+    auto read_or = archive.Read(buffer.data(), static_cast<unsigned int>(buffer.size()));
     if (!read_or) {
       return std::unexpected(read_or.error());
     }
@@ -662,7 +660,7 @@ std::expected<SearchResult, rockyou::AppError> SearchFileRegex(const std::string
     }
   }
 
-  auto close_status = stream.CloseWithStatus();
+  auto close_status = archive.CloseEntryWithStatus();
   if (!close_status) {
     return std::unexpected(close_status.error());
   }
@@ -747,6 +745,7 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
   for ([[maybe_unused]] const auto _ : std::views::iota(0u, thread_count)) {
     workers.emplace_back([&](std::stop_token stop_token) {
       std::stop_callback stop_callback(stop_source.get_token(), [&]() noexcept { stop_source.request_stop(); });
+      auto archive_or = ZipArchive::Open(path);
       while (true) {
         if (stop_token.stop_requested()) {
           break;
@@ -771,12 +770,21 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
           }
           const auto& entry = entries[idx];
           std::expected<SearchResult, rockyou::AppError> result_or;
+          if (!archive_or) {
+            errors[idx] = std::format(kErrorProcessingFormat, entry.first, archive_or.error().message);
+            SearchResult failed;
+            failed.filename = entry.first;
+            failed.error = archive_or.error().message;
+            results[idx] = std::move(failed);
+            continue;
+          }
+          ZipArchive& archive = *archive_or;
           if (regex_pattern.has_value()) {
-            result_or = SearchFileRegex(path, entry.first, entry.second, regex_pattern.value(), chunk_size,
+            result_or = SearchFileRegex(archive, entry.first, entry.second, regex_pattern.value(), chunk_size,
                                         context_size, min_buffer_size, options.per_file_limit, options.highlight);
           } else {
             result_or =
-                SearchFile(path, entry.first, entry.second, keyword, pattern, options.case_insensitive, chunk_size,
+                SearchFile(archive, entry.first, entry.second, keyword, pattern, options.case_insensitive, chunk_size,
                            context_size, min_buffer_size, options.per_file_limit, options.highlight);
           }
           if (!result_or) {

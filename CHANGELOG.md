@@ -10,6 +10,8 @@
   buffer are kept.
 - `--regex -i` now compiles with `std::regex::icase`, so case-insensitive
   regex search matches the CLI flag.
+- Workers keep one ZIP handle (`ZipArchive`) and switch entries instead of
+  calling `unzOpen` per file.
 
 ## [0.7.0] - 2026-07-09
 

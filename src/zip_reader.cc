@@ -127,6 +127,106 @@ Result<ZipIndex> BuildZipIndex(const std::string& path) {
   return index;
 }
 
+
+ZipArchive::ZipArchive(unzFile handle) : handle_(handle), size_(0), entry_open_(false) {}
+
+ZipArchive::ZipArchive(ZipArchive&& other) noexcept
+    : handle_(other.handle_), size_(other.size_), entry_open_(other.entry_open_) {
+  other.handle_ = nullptr;
+  other.size_ = 0;
+  other.entry_open_ = false;
+}
+
+ZipArchive& ZipArchive::operator=(ZipArchive&& other) noexcept {
+  if (this != &other) {
+    CloseEntry();
+    if (handle_ != nullptr) {
+      unzClose(handle_);
+    }
+    handle_ = other.handle_;
+    size_ = other.size_;
+    entry_open_ = other.entry_open_;
+    other.handle_ = nullptr;
+    other.size_ = 0;
+    other.entry_open_ = false;
+  }
+  return *this;
+}
+
+ZipArchive::~ZipArchive() {
+  CloseEntry();
+  if (handle_ != nullptr) {
+    unzClose(handle_);
+  }
+}
+
+Result<ZipArchive> ZipArchive::Open(const std::string& path) {
+  auto zip_or = ZipFile::Open(path);
+  if (!zip_or) {
+    return std::unexpected(zip_or.error());
+  }
+  ZipFile zip = *std::move(zip_or);
+  return ZipArchive(zip.Release());
+}
+
+Result<void> ZipArchive::OpenEntry(const std::string& name, const ZipIndexEntry& entry) {
+  if (handle_ == nullptr) {
+    return std::unexpected(rockyou::MakeError(rockyou::ErrorCode::ZipError, std::string(rockyou::kZipInvalidHandle)));
+  }
+  CloseEntry();
+  if (entry.offset != 0) {
+    if (unzSetOffset(handle_, static_cast<std::uint64_t>(entry.offset)) != UNZ_OK) {
+      if (unzLocateFile(handle_, name.c_str(), 0) != UNZ_OK) {
+        return std::unexpected(
+            rockyou::MakeError(rockyou::ErrorCode::ZipError, std::string(rockyou::kZipLocateError) + name));
+      }
+    }
+  } else {
+    if (unzLocateFile(handle_, name.c_str(), 0) != UNZ_OK) {
+      return std::unexpected(
+          rockyou::MakeError(rockyou::ErrorCode::ZipError, std::string(rockyou::kZipLocateError) + name));
+    }
+  }
+  if (unzOpenCurrentFile(handle_) != UNZ_OK) {
+    return std::unexpected(
+        rockyou::MakeError(rockyou::ErrorCode::ZipError, std::string(rockyou::kZipOpenEntryError) + name));
+  }
+  entry_open_ = true;
+  size_ = entry.size;
+  return {};
+}
+
+void ZipArchive::CloseEntry() {
+  if (entry_open_) {
+    unzCloseCurrentFile(handle_);
+    entry_open_ = false;
+  }
+}
+
+std::expected<int, rockyou::AppError> ZipArchive::Read(char* buffer, unsigned int length) {
+  if (!entry_open_) {
+    return std::unexpected(
+        rockyou::MakeError(rockyou::ErrorCode::ZipError, std::string(rockyou::kZipClosedEntryReadError)));
+  }
+  const int result = unzReadCurrentFile(handle_, buffer, length);
+  if (result < 0) {
+    return std::unexpected(rockyou::MakeError(rockyou::ErrorCode::ZipError, std::string(rockyou::kZipReadError)));
+  }
+  return result;
+}
+
+std::expected<void, rockyou::AppError> ZipArchive::CloseEntryWithStatus() {
+  if (!entry_open_) {
+    return {};
+  }
+  const int result = unzCloseCurrentFile(handle_);
+  entry_open_ = false;
+  if (result != UNZ_OK) {
+    return std::unexpected(rockyou::MakeError(rockyou::ErrorCode::ZipError, std::string(rockyou::kZipReadError)));
+  }
+  return {};
+}
+
 ZipEntryStream::ZipEntryStream(unzFile handle, size_t size, bool entry_open)
     : handle_(handle), size_(size), entry_open_(entry_open) {}
 
