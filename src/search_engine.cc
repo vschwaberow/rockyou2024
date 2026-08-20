@@ -701,7 +701,7 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
     if (options.regex_mode.has_value()) {
       mode = ParseRegexMode(options.regex_mode.value());
     }
-    auto compiled_or = CompileRegexPattern(keyword, mode);
+    auto compiled_or = CompileRegexPattern(keyword, mode, options.case_insensitive);
     if (!compiled_or) {
       return std::unexpected(compiled_or.error());
     }

@@ -37,7 +37,8 @@ struct RegexMatch {
   std::string matched_text;
 };
 
-Result<RegexPattern> CompileRegexPattern(const std::string& pattern_str, RegexMode mode = RegexMode::kECMAScript);
+Result<RegexPattern> CompileRegexPattern(const std::string& pattern_str, RegexMode mode = RegexMode::kECMAScript,
+                                         bool case_insensitive = false);
 
 std::vector<RegexMatch> RegexSearchAll(const RegexPattern& regex_pattern, std::string_view text);
 
@@ -172,7 +173,7 @@ std::size_t EstimateMinMatchLength(std::string_view pattern) {
 
 namespace rockyou {
 
-Result<RegexPattern> CompileRegexPattern(const std::string& pattern_str, RegexMode mode) {
+Result<RegexPattern> CompileRegexPattern(const std::string& pattern_str, RegexMode mode, bool case_insensitive) {
 
   if (pattern_str.empty()) {
     return std::unexpected(MakeError(ErrorCode::InvalidInput, std::string(kErrorEmptyRegexPattern)));
@@ -180,6 +181,9 @@ Result<RegexPattern> CompileRegexPattern(const std::string& pattern_str, RegexMo
 
   try {
     auto regex_flags = ConvertRegexMode(mode);
+    if (case_insensitive) {
+      regex_flags |= std::regex::icase;
+    }
     std::regex compiled_pattern(pattern_str, regex_flags);
 
     auto literal_prefix = ExtractLiteralPrefix(pattern_str);

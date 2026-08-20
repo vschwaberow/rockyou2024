@@ -671,4 +671,26 @@ TEST(RegexEngineTest, RegexSearchWithoutLiteralPrefixFindsSameMatch) {
   EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);
 }
 
+
+TEST(RegexEngineTest, RegexSearchCaseSensitiveMissesDifferentCase) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "PASSWORD123", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("Occurrences in \"common.txt\": 0"), std::string::npos);
+}
+
+TEST(RegexEngineTest, RegexSearchCaseInsensitiveFindsDifferentCase) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  options.case_insensitive = true;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "PASSWORD123", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);
+}
+
 } // namespace

@@ -8,6 +8,8 @@
   `SearchFileRegex` (full-buffer and chunked reads). Accept-window
   offsets use saturating subtraction so matches near the start of a
   buffer are kept.
+- `--regex -i` now compiles with `std::regex::icase`, so case-insensitive
+  regex search matches the CLI flag.
 
 ## [0.7.0] - 2026-07-09
 
