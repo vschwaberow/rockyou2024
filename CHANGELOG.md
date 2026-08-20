@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-20
+
 ### Search
 
 - Regex search now uses the Boyer-Moore literal-prefix fast path in
