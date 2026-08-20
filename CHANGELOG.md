@@ -12,6 +12,9 @@
   regex search matches the CLI flag.
 - Workers keep one ZIP handle (`ZipArchive`) and switch entries instead of
   calling `unzOpen` per file.
+- Regex `min_match_length` treats quantifiers as applying to the previous
+  atom. When the minimum is unknown (0), chunk overlap falls back to up
+  to 64 KiB so matches cannot vanish on a chunk boundary.
 
 ## [0.7.0] - 2026-07-09
 

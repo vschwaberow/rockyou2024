@@ -58,6 +58,7 @@ namespace {
 constexpr size_t kDefaultChunkSize = 1024 * 1024;
 constexpr size_t kDefaultMinFileSizeForBuffer = 10 * 1024 * 1024;
 constexpr int kDefaultContextSize = 20;
+constexpr size_t kRegexUnknownOverlap = 65536;
 
 using Occurrence = std::tuple<int, int, std::string>;
 
@@ -652,7 +653,12 @@ std::expected<SearchResult, rockyou::AppError> SearchFileRegex(ZipArchive& archi
     }
 
     processed += static_cast<size_t>(read_bytes);
-    const size_t max_overlap = regex_pattern.min_match_length > 0 ? regex_pattern.min_match_length - 1 : 0;
+    size_t max_overlap = 0;
+    if (regex_pattern.min_match_length == 0) {
+      max_overlap = std::min(chunk_size > 0 ? chunk_size - 1 : 0, kRegexUnknownOverlap);
+    } else {
+      max_overlap = regex_pattern.min_match_length - 1;
+    }
     if (search_text.size() <= max_overlap) {
       overlap = search_text;
     } else {

@@ -115,14 +115,23 @@ std::regex::flag_type ConvertRegexMode(rockyou::RegexMode mode) {
 
 std::size_t EstimateMinMatchLength(std::string_view pattern) {
   std::size_t min_len = 0;
+  std::size_t last_atom = 0;
   bool escape_next = false;
   bool in_char_class = false;
 
+  auto apply_quantifier_min = [&](std::size_t repeat_min) {
+    min_len -= last_atom;
+    const std::size_t quantified = last_atom * repeat_min;
+    min_len += quantified;
+    last_atom = quantified;
+  };
+
   for (size_t i = 0; i < pattern.length(); ++i) {
-    char c = pattern[i];
+    const char c = pattern[i];
 
     if (escape_next) {
-      min_len++;
+      last_atom = 1;
+      min_len += 1;
       escape_next = false;
       continue;
     }
@@ -132,38 +141,62 @@ std::size_t EstimateMinMatchLength(std::string_view pattern) {
       continue;
     }
 
-    if (c == '[' && !in_char_class) {
+    if (in_char_class) {
+      if (c == ']') {
+        in_char_class = false;
+        last_atom = 1;
+        min_len += 1;
+      }
+      continue;
+    }
+
+    if (c == '[') {
       in_char_class = true;
       continue;
     }
 
-    if (c == ']' && in_char_class) {
-      in_char_class = false;
-      min_len++;
+    if (c == '|' || c == '(') {
+      return min_len;
+    }
+
+    if (c == ')' || c == '^' || c == '$' || c == '}') {
       continue;
     }
 
-    if (in_char_class) {
+    if (c == '*') {
+      apply_quantifier_min(0);
+      continue;
+    }
+    if (c == '?') {
+      apply_quantifier_min(0);
+      continue;
+    }
+    if (c == '+') {
+      apply_quantifier_min(1);
+      continue;
+    }
+    if (c == '{') {
+      size_t j = i + 1;
+      std::size_t n = 0;
+      bool saw_digit = false;
+      while (j < pattern.length() && pattern[j] >= '0' && pattern[j] <= '9') {
+        saw_digit = true;
+        n = n * 10 + static_cast<std::size_t>(pattern[j] - '0');
+        ++j;
+      }
+      if (!saw_digit) {
+        return min_len;
+      }
+      apply_quantifier_min(n);
+      while (j < pattern.length() && pattern[j] != '}') {
+        ++j;
+      }
+      i = j;
       continue;
     }
 
-    switch (c) {
-      case '^':
-      case '$':
-      case '|':
-      case '(':
-      case ')':
-        break;
-      case '.':
-      case '*':
-      case '+':
-      case '?':
-      case '{':
-      case '}':
-        break;
-      default:
-        min_len++;
-    }
+    last_atom = 1;
+    min_len += 1;
   }
 
   return min_len;

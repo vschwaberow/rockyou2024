@@ -738,4 +738,34 @@ TEST(RegexEngineTest, RegexSearchCaseInsensitiveFindsDifferentCase) {
   EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);
 }
 
+
+TEST(RegexEngineTest, EstimateMinMatchLengthStarIsZero) {
+  auto compiled = rockyou::CompileRegexPattern("a*");
+  ASSERT_TRUE(compiled.has_value()) << compiled.error().message;
+  EXPECT_EQ(compiled->min_match_length, 0u);
+}
+
+TEST(RegexEngineTest, EstimateMinMatchLengthBoundedRepeat) {
+  auto compiled = rockyou::CompileRegexPattern("ab{2,5}");
+  ASSERT_TRUE(compiled.has_value()) << compiled.error().message;
+  EXPECT_EQ(compiled->min_match_length, 3u);
+}
+
+TEST(RegexEngineTest, EstimateMinMatchLengthDotStar) {
+  auto compiled = rockyou::CompileRegexPattern("x.*y");
+  ASSERT_TRUE(compiled.has_value()) << compiled.error().message;
+  EXPECT_EQ(compiled->min_match_length, 2u);
+}
+
+TEST(RegexEngineTest, RegexSearchChunkOverlapCatchesBoundaryMatch) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.regex = true;
+  options.chunk_size = 6;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "d123 g", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);
+}
+
 } // namespace
