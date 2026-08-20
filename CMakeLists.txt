@@ -19,9 +19,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-find_program(CLANG_TIDY_EXE NAMES clang-tidy REQUIRED)
-find_program(CLANG_FORMAT_EXE NAMES clang-format REQUIRED)
-find_program(CPPCHECK_EXE NAMES cppcheck REQUIRED)
+find_program(CLANG_TIDY_EXE NAMES clang-tidy)
+find_program(CLANG_FORMAT_EXE NAMES clang-format)
+find_program(CPPCHECK_EXE NAMES cppcheck)
 find_program(IWYU_EXE NAMES include-what-you-use)
 find_program(CCACHE_EXE NAMES ccache)
 
@@ -169,14 +169,16 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/fuzzing/CMakeLists.txt)
   add_subdirectory(fuzzing)
 endif()
 
-add_custom_target(format
-  COMMAND ${CLANG_FORMAT_EXE} -i -style=file
-          ${CMAKE_SOURCE_DIR}/src/*.cc
-          ${CMAKE_SOURCE_DIR}/src/*.cppm
-          ${CMAKE_SOURCE_DIR}/tests/*.cc
-          ${CMAKE_SOURCE_DIR}/CMakeLists.txt
-  COMMENT "Formatting all source with clang-format (LLVM style)"
-)
+if(CLANG_FORMAT_EXE)
+  add_custom_target(format
+    COMMAND ${CLANG_FORMAT_EXE} -i -style=file
+            ${CMAKE_SOURCE_DIR}/src/*.cc
+            ${CMAKE_SOURCE_DIR}/src/*.cppm
+            ${CMAKE_SOURCE_DIR}/tests/*.cc
+            ${CMAKE_SOURCE_DIR}/CMakeLists.txt
+    COMMENT "Formatting all source with clang-format (LLVM style)"
+  )
+endif()
 
 find_program(GCOVR_EXE NAMES gcovr)
 if(GCOVR_EXE)

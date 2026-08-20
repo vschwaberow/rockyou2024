@@ -2,106 +2,30 @@ name: Cross-Platform Build
 
 on:
   push:
-    branches: [ main, rewrite_cpp26 ]
+    branches: [master, main]
   pull_request:
-    branches: [ main, rewrite_cpp26 ]
+    branches: [master, main]
   release:
     types: [published]
 
+permissions:
+  contents: write
+
 jobs:
-  build:
-    name: Build on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            generator: "Unix Makefiles"
-            build_dir: build/linux
-            configure_args: "-DCMAKE_BUILD_TYPE=Release"
-            build_config: ""
-            ctest_config: ""
-            cpack_config: Release
-            artifact_suffix: linux
-            cc: clang
-            cxx: clang++
-          - os: macos-latest
-            generator: "Unix Makefiles"
-            build_dir: build/macos
-            configure_args: "-DCMAKE_BUILD_TYPE=Release"
-            build_config: ""
-            ctest_config: ""
-            cpack_config: Release
-            artifact_suffix: macos
-            cc: clang
-            cxx: clang++
-          - os: windows-latest
-            generator: "Visual Studio 17 2022"
-            build_dir: build/windows
-            configure_args: ""
-            build_config: "--config Release"
-            ctest_config: "-C Release"
-            cpack_config: Release
-            artifact_suffix: windows
-            cc: ""
-            cxx: ""
+  linux:
+    uses: ./.github/workflows/build-os.yml
+    with:
+      runner: ubuntu-latest
+      artifact_suffix: linux
 
-    steps:
-      - uses: actions/checkout@v4
+  macos:
+    uses: ./.github/workflows/build-os.yml
+    with:
+      runner: macos-latest
+      artifact_suffix: macos
 
-      - name: Ensure Clang is available
-        if: matrix.os != 'windows-latest'
-        run: |
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            sudo apt-get update -qq
-            sudo apt-get install -y clang
-          fi
-          # macOS: AppleClang is provided by the runner
-          clang --version || true
-
-      - name: Configure CMake
-        env:
-          CC: ${{ matrix.cc }}
-          CXX: ${{ matrix.cxx }}
-        run: cmake -S . -B "${{ matrix.build_dir }}" -G "${{ matrix.generator }}" ${{ matrix.configure_args }}
-
-      - name: Build
-        run: cmake --build "${{ matrix.build_dir }}" ${{ matrix.build_config }}
-
-      - name: Test
-        run: ctest ${{ matrix.ctest_config }} --test-dir "${{ matrix.build_dir }}"
-
-      - name: Package
-        working-directory: ${{ matrix.build_dir }}
-        run: cpack -G ZIP -C ${{ matrix.cpack_config }}
-
-      - name: Locate package
-        id: locate-package
-        shell: bash
-        run: |
-          set -euo pipefail
-          PACKAGE=$(find "${{ matrix.build_dir }}" -maxdepth 1 -type f -name "*.zip" -print -quit)
-          if [ -z "$PACKAGE" ]; then
-            echo "No package archive found" >&2
-            exit 1
-          fi
-          echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: search-${{ matrix.artifact_suffix }}-${{ github.sha }}
-          path: |
-            ${{ matrix.build_dir }}/bin/**
-            ${{ steps.locate-package.outputs.package }}
-
-      - name: Upload release asset
-        if: github.event_name == 'release'
-        run: |
-          gh release upload "${{ github.event.release.tag_name }}" \
-            "${{ steps.locate-package.outputs.package }}" \
-            --repo "${{ github.repository }}" \
-            --clobber
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  windows:
+    uses: ./.github/workflows/build-os.yml
+    with:
+      runner: windows-latest
+      artifact_suffix: windows

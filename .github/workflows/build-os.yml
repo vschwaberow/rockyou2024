@@ -1,0 +1,132 @@
+name: Build one OS
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        required: true
+        type: string
+      artifact_suffix:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ inputs.artifact_suffix }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 90
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 4
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: "3.30.9"
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+
+      - name: Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ninja-build clang libssl-dev
+
+      - name: macOS packages
+        if: runner.os == 'macOS'
+        run: |
+          brew install ninja llvm openssl@3
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+
+      - name: Windows packages
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          choco install ninja llvm openssl -y --no-progress
+          echo "C:/Program Files/LLVM/bin" >> "$GITHUB_PATH"
+          echo "OPENSSL_ROOT_DIR=C:/Program Files/OpenSSL-Win64" >> "$GITHUB_ENV"
+
+      - name: Configure
+        shell: bash
+        run: |
+          extra=()
+          if [ -n "${CMAKE_PREFIX_PATH:-}" ]; then
+            extra+=(-DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH")
+          fi
+          if [ -n "${OPENSSL_ROOT_DIR:-}" ]; then
+            extra+=(-DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR")
+          fi
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            "${extra[@]}"
+
+      - name: Build
+        run: cmake --build build --target search search_tests
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package
+        working-directory: build
+        run: cpack -G ZIP -C Release
+
+      - name: Name artifacts
+        id: assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          else
+            TAG="${{ github.sha }}"
+          fi
+          SUFFIX="${{ inputs.artifact_suffix }}"
+          ZIP_SRC="$(find build -maxdepth 1 -type f -name '*.zip' | head -n 1)"
+          if [ -z "$ZIP_SRC" ]; then
+            echo "No CPack zip found" >&2
+            exit 1
+          fi
+          ZIP_DST="search-${SUFFIX}-${TAG}.zip"
+          cp "$ZIP_SRC" "$ZIP_DST"
+
+          if [ -f build/bin/search.exe ]; then
+            BIN_SRC="build/bin/search.exe"
+            BIN_DST="search-${SUFFIX}.exe"
+          elif [ -f build/bin/search ]; then
+            BIN_SRC="build/bin/search"
+            BIN_DST="search-${SUFFIX}"
+          else
+            echo "No search executable in build/bin" >&2
+            ls -la build/bin || true
+            exit 1
+          fi
+          cp "$BIN_SRC" "$BIN_DST"
+          echo "zip=$ZIP_DST" >> "$GITHUB_OUTPUT"
+          echo "bin=$BIN_DST" >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: search-${{ inputs.artifact_suffix }}-${{ github.sha }}
+          path: |
+            ${{ steps.assets.outputs.zip }}
+            ${{ steps.assets.outputs.bin }}
+          if-no-files-found: error
+
+      - name: Upload release assets
+        if: github.event_name == 'release'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            "${{ steps.assets.outputs.zip }}" \
+            "${{ steps.assets.outputs.bin }}" \
+            --repo "${{ github.repository }}" \
+            --clobber

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### CI
+
+- Linux, macOS, and Windows builds run as independent jobs. A published
+  GitHub release uploads each platform zip and the `search` binary as
+  assets without waiting on the other operating systems.
+
 ## [0.8.0] - 2026-08-20
 
 ### Search

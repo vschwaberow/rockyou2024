@@ -2,12 +2,14 @@ name: Release Notes
 
 on:
   push:
-    branches: [main, rewrite_cpp26]
+    branches: [master, main]
 
 jobs:
   update:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/rewrite_cpp26'
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: release-drafter/release-drafter@v6
         env:
