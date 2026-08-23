@@ -87,21 +87,21 @@ jobs:
         run: cmake --build build --target search search_tests
 
       - name: Test
-        shell: bash
+        if: runner.os != 'Windows'
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Test
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          if [ "${RUNNER_OS}" = "Windows" ]; then
-            shopt -s nullglob
-            for src in "/c/vcpkg/installed/x64-windows/bin" "/c/Program Files/LLVM/bin"; do
-              dlls=("${src}"/*.dll)
-              for dir in build build/bin; do
-                if [ ${#dlls[@]} -gt 0 ]; then
-                  cp "${dlls[@]}" "${dir}/"
-                fi
-              done
-            done
-            shopt -u nullglob
-            export PATH="/c/vcpkg/installed/x64-windows/bin:/c/Program Files/LLVM/bin:${PATH}"
-          fi
+          $vcpkgBin = 'C:cpkg\installedd-windowsin'
+          $applocal = 'C:cpkg\scriptspplocal.ps1'
+          foreach ($bin in @('build\search_tests.exe', 'buildin\search.exe')) {
+            if (Test-Path $bin) {
+              & $applocal -TargetBinary $bin -InstalledDir $vcpkgBin
+            }
+          }
+          $env:Path = "$vcpkgBin;C:\Program Files\LLVMin;" + $env:Path
           ctest --test-dir build --output-on-failure
 
       - name: Package
