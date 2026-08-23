@@ -94,14 +94,29 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $vcpkgBin = 'C:/vcpkg/installed/x64-windows/bin'
-          $applocal = 'C:/vcpkg/scripts/applocal.ps1'
-          foreach ($bin in @('build/search_tests.exe', 'build/bin/search.exe')) {
-            if (Test-Path $bin) {
-              & $applocal -TargetBinary $bin -InstalledDir $vcpkgBin
+          $ErrorActionPreference = 'Stop'
+          $dests = @('build', 'build/bin')
+          $sources = @(
+            'C:/vcpkg/installed/x64-windows/bin',
+            'C:/Program Files/LLVM/bin'
+          )
+          foreach ($src in $sources) {
+            if (-not (Test-Path $src)) { continue }
+            Get-ChildItem -Path $src -Filter '*.dll' | ForEach-Object {
+              foreach ($dest in $dests) {
+                Copy-Item $_.FullName -Destination $dest -Force
+              }
             }
           }
-          $env:Path = "$vcpkgBin;C:/Program Files/LLVM/bin;" + $env:Path
+          $env:Path = "C:/vcpkg/installed/x64-windows/bin;C:/Program Files/LLVM/bin;" + $env:Path
+          if (Get-Command dumpbin -ErrorAction SilentlyContinue) {
+            dumpbin /dependents build/search_tests.exe
+          }
+          & ./build/search_tests.exe --gtest_filter=SearchEngineTest.CLIHelpReturnsSuccess
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "search_tests exited $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
           ctest --test-dir build --output-on-failure
 
       - name: Package
