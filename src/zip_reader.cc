@@ -175,7 +175,7 @@ Result<void> ZipArchive::OpenEntry(const std::string& name, const ZipIndexEntry&
   }
   CloseEntry();
   if (entry.offset != 0) {
-    if (unzSetOffset(handle_, static_cast<std::uint64_t>(entry.offset)) != UNZ_OK) {
+    if (unzSetOffset64(handle_, static_cast<int64_t>(entry.offset)) != UNZ_OK) {
       if (unzLocateFile(handle_, name.c_str(), 0) != UNZ_OK) {
         return std::unexpected(
             rockyou::MakeError(rockyou::ErrorCode::ZipError, std::string(rockyou::kZipLocateError) + name));
@@ -281,7 +281,7 @@ Result<void> ZipEntryStream::OpenEntry(const std::string& name, const ZipIndexEn
     return std::unexpected(rockyou::MakeError(rockyou::ErrorCode::ZipError, std::string(rockyou::kZipInvalidHandle)));
   }
   if (entry.offset != 0) {
-    if (unzSetOffset(handle_, static_cast<std::uint64_t>(entry.offset)) != UNZ_OK) {
+    if (unzSetOffset64(handle_, static_cast<int64_t>(entry.offset)) != UNZ_OK) {
       if (unzLocateFile(handle_, name.c_str(), 0) != UNZ_OK) {
         return std::unexpected(
             rockyou::MakeError(rockyou::ErrorCode::ZipError, std::string(rockyou::kZipLocateError) + name));

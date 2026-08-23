@@ -77,12 +77,30 @@ else()
   FetchContent_MakeAvailable(blake3)
 endif()
 
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+
 FetchContent_Declare(
   googletest
   GIT_REPOSITORY https://github.com/google/googletest.git
   GIT_TAG v1.15.2
 )
 FetchContent_MakeAvailable(googletest)
+
+option(ROCKYOU_USE_HOMEBREW_LLVM "Use Homebrew LLVM libc++ on macOS" OFF)
+
+if(APPLE AND ROCKYOU_USE_HOMEBREW_LLVM)
+  find_program(BREW_EXE brew REQUIRED)
+  execute_process(
+    COMMAND ${BREW_EXE} --prefix llvm
+    OUTPUT_VARIABLE ROCKYOU_HOMEBREW_LLVM
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  set(ROCKYOU_HOMEBREW_LIBCXX "${ROCKYOU_HOMEBREW_LLVM}/lib/c++")
+  if(NOT IS_DIRECTORY "${ROCKYOU_HOMEBREW_LIBCXX}")
+    set(ROCKYOU_HOMEBREW_LIBCXX "${ROCKYOU_HOMEBREW_LLVM}/lib")
+  endif()
+  set(ROCKYOU_HOMEBREW_CXX_INC "${ROCKYOU_HOMEBREW_LLVM}/include/c++/v1")
+endif()
 
 find_package(OpenSSL REQUIRED)
 add_library(search_core STATIC)
@@ -215,7 +233,19 @@ install(TARGETS search
   RUNTIME DESTINATION bin
   COMPONENT applications
 )
+set(CPACK_COMPONENTS_ALL applications)
+set(CPACK_INSTALL_CMAKE_PROJECTS "${PROJECT_NAME};applications;${CMAKE_BINARY_DIR};/")
 include(CPack)
+
+if(APPLE AND ROCKYOU_USE_HOMEBREW_LLVM)
+  target_compile_options(search_core PUBLIC -stdlib=libc++ "-isystem${ROCKYOU_HOMEBREW_CXX_INC}")
+  target_link_options(search_core PUBLIC
+    -stdlib=libc++
+    "-L${ROCKYOU_HOMEBREW_LIBCXX}"
+    "-Wl,-rpath,${ROCKYOU_HOMEBREW_LIBCXX}"
+    -lc++
+  )
+endif()
 
 message(STATUS "rockyou2024 C++26 configured with modules, clang-tidy, cppcheck, -Werror")
 message(STATUS "Use: cmake --preset debug && cmake --build build/debug && ctest --preset default")

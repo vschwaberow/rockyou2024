@@ -73,16 +73,9 @@ jobs:
             extra+=(-DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20)
           elif [ "${RUNNER_OS}" = "macOS" ]; then
             llvm="$(brew --prefix llvm)"
-            libcxx="${llvm}/lib/c++"
-            if [ ! -d "${libcxx}" ]; then
-              libcxx="${llvm}/lib"
-            fi
-            cxx_inc="${llvm}/include/c++/v1"
-            cxx_link="-stdlib=libc++ -L${libcxx} -Wl,-rpath,${libcxx} -lc++"
             extra+=(-DCMAKE_C_COMPILER="${llvm}/bin/clang"
                     -DCMAKE_CXX_COMPILER="${llvm}/bin/clang++"
-                    -DCMAKE_CXX_FLAGS="-stdlib=libc++ -isystem ${cxx_inc}"
-                    -DCMAKE_CXX_LINK_FLAGS="${cxx_link}")
+                    -DROCKYOU_USE_HOMEBREW_LLVM=ON)
           else
             extra+=(-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++)
           fi
