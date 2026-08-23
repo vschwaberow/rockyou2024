@@ -463,8 +463,12 @@ TEST(SearchEngineTest, BuildZipIndexOnMissingFileReturnsError) {
 }
 
 std::string GetSearchBinary() {
+#ifdef SEARCH_BINARY
+  return SEARCH_BINARY;
+#else
   std::filesystem::path root = std::filesystem::path(TEST_DATA_DIR).parent_path().parent_path();
   return (root / "build" / "debug" / "bin" / "search").string();
+#endif
 }
 
 TEST(SearchEngineTest, CLIHelpReturnsSuccess) {

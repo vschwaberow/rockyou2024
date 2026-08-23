@@ -51,9 +51,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          choco install ninja llvm openssl -y --no-progress
+          choco install ninja llvm -y --no-progress
           echo "C:/Program Files/LLVM/bin" >> "$GITHUB_PATH"
-          echo "OPENSSL_ROOT_DIR=C:/Program Files/OpenSSL" >> "$GITHUB_ENV"
+          if [ ! -f "/c/vcpkg/installed/x64-windows/lib/libcrypto.lib" ]; then
+            vcpkg install openssl:x64-windows
+          fi
+          echo "CMAKE_PREFIX_PATH=C:/vcpkg/installed/x64-windows" >> "$GITHUB_ENV"
 
       - name: Configure
         shell: bash
@@ -75,13 +78,11 @@ jobs:
               libcxx="${llvm}/lib"
             fi
             cxx_inc="${llvm}/include/c++/v1"
-            link_flags="-stdlib=libc++ -L${libcxx} -Wl,-rpath,${libcxx} -lc++ -lunwind"
+            cxx_link="-stdlib=libc++ -L${libcxx} -Wl,-rpath,${libcxx} -lc++"
             extra+=(-DCMAKE_C_COMPILER="${llvm}/bin/clang"
                     -DCMAKE_CXX_COMPILER="${llvm}/bin/clang++"
                     -DCMAKE_CXX_FLAGS="-stdlib=libc++ -isystem ${cxx_inc}"
-                    -DCMAKE_EXE_LINKER_FLAGS="${link_flags}"
-                    -DCMAKE_SHARED_LINKER_FLAGS="${link_flags}"
-                    -DCMAKE_MODULE_LINKER_FLAGS="${link_flags}")
+                    -DCMAKE_CXX_LINK_FLAGS="${cxx_link}")
           else
             extra+=(-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++)
           fi

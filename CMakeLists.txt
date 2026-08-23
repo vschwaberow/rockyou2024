@@ -144,11 +144,15 @@ set_target_properties(search PROPERTIES
 )
 
 add_executable(search_tests tests/search_engine_test.cc)
+add_dependencies(search_tests search)
 target_link_libraries(search_tests PRIVATE search_core GTest::gtest_main)
 target_compile_options(search_tests PRIVATE
   $<$<CXX_COMPILER_ID:Clang,GNU>:-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion -Werror -Wno-unused-function -Wno-deprecated-declarations -Wno-sign-conversion -Wno-redundant-move>
 )
-target_compile_definitions(search_tests PRIVATE TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data")
+target_compile_definitions(search_tests PRIVATE
+  TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data"
+  SEARCH_BINARY="$<TARGET_FILE:search>"
+)
 add_test(NAME search_tests COMMAND search_tests)
 
 #C++ 26 / Jason Turner style : coverage instrumentation for Debug builds
