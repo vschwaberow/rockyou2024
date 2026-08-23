@@ -28,7 +28,6 @@ module;
 #include <ranges>
 #include <set>
 #include <span>
-#include <stop_token>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -744,16 +743,15 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
   if (thread_count == 0) {
     thread_count = kDefaultThreadCountFallback;
   }
-  std::stop_source stop_source;
+  std::atomic<bool> stop_requested{false};
   std::latch completion_latch{static_cast<std::ptrdiff_t>(thread_count)};
-  std::vector<std::jthread> workers;
+  std::vector<std::thread> workers;
   workers.reserve(thread_count);
   for ([[maybe_unused]] const auto _ : std::views::iota(0u, thread_count)) {
-    workers.emplace_back([&](std::stop_token stop_token) {
-      std::stop_callback stop_callback(stop_source.get_token(), [&]() noexcept { stop_source.request_stop(); });
+    workers.emplace_back([&]() {
       auto archive_or = ZipArchive::Open(path);
       while (true) {
-        if (stop_token.stop_requested()) {
+        if (stop_requested.load(std::memory_order_relaxed)) {
           break;
         }
         const size_t batch_start = next_index.fetch_add(kWorkBatchSize, std::memory_order_relaxed);
@@ -762,7 +760,7 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
         }
         const size_t batch_end = std::min(batch_start + kWorkBatchSize, entries.size());
         for (size_t idx = batch_start; idx < batch_end; ++idx) {
-          if (stop_token.stop_requested()) {
+          if (stop_requested.load(std::memory_order_relaxed)) {
             break;
           }
           int slot_budget = remaining_limit.load(std::memory_order_relaxed);
@@ -771,7 +769,7 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
             skipped.filename = entries[idx].first;
             skipped.truncated = true;
             results[idx] = std::move(skipped);
-            stop_source.request_stop();
+            stop_requested.store(true, std::memory_order_relaxed);
             continue;
           }
           const auto& entry = entries[idx];
@@ -809,7 +807,7 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
             if (idx < results.size() && results[idx].has_value()) {
               results[idx]->truncated = true;
             }
-            stop_source.request_stop();
+            stop_requested.store(true, std::memory_order_relaxed);
             break;
           }
         }
@@ -818,7 +816,9 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
     });
   }
   completion_latch.wait();
-  workers.clear();
+  for (std::thread& worker : workers) {
+    worker.join();
+  }
   const auto t2 = std::chrono::high_resolution_clock::now();
   const std::chrono::duration<double> elapsed = t2 - t1;
 
