@@ -471,50 +471,68 @@ std::string GetSearchBinary() {
 #endif
 }
 
+std::filesystem::path CliTempFile(const char* name) {
+  const char* tmp = std::getenv("TMPDIR");
+  if (tmp == nullptr || tmp[0] == '\0') {
+    tmp = std::getenv("TEMP");
+  }
+  if (tmp == nullptr || tmp[0] == '\0') {
+    tmp = std::getenv("TMP");
+  }
+  if (tmp == nullptr || tmp[0] == '\0') {
+    tmp = "/tmp";
+  }
+  return std::filesystem::path(tmp) / name;
+}
+
+std::string QuotePath(const std::string& path) {
+  return "\"" + path + "\"";
+}
+
 TEST(SearchEngineTest, CLIHelpReturnsSuccess) {
-  std::string bin = GetSearchBinary();
-  std::string cmd = bin + " --help > /tmp/rockyou_cli_help.txt 2>&1";
+  const auto out = CliTempFile("rockyou_cli_help.txt");
+  std::string cmd = QuotePath(GetSearchBinary()) + " --help > " + QuotePath(out.string()) + " 2>&1";
   int ret = std::system(cmd.c_str());
   EXPECT_EQ(ret, 0);
 }
 
 TEST(SearchEngineTest, CLIBasicSearchReturnsSuccessAndProducesOutput) {
-  std::string bin = GetSearchBinary();
-  std::string zip = TestDataPath("sample.zip").string();
-  std::string cmd = bin + " " + zip + " password123 > /tmp/rockyou_cli_basic.txt 2>&1";
+  const auto out = CliTempFile("rockyou_cli_basic.txt");
+  std::string cmd = QuotePath(GetSearchBinary()) + " " + QuotePath(TestDataPath("sample.zip").string()) +
+                    " password123 > " + QuotePath(out.string()) + " 2>&1";
   int ret = std::system(cmd.c_str());
   EXPECT_EQ(ret, 0);
 
-  std::ifstream f("/tmp/rockyou_cli_basic.txt");
+  std::ifstream f(out);
   std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
   EXPECT_NE(content.find("Occurrences in \"common.txt\""), std::string::npos);
 }
 
 TEST(SearchEngineTest, CLIJsonFlagProducesJsonOutput) {
-  std::string bin = GetSearchBinary();
-  std::string zip = TestDataPath("sample.zip").string();
-  std::string cmd = bin + " " + zip + " password123 --json > /tmp/rockyou_cli_json.txt 2>&1";
+  const auto out = CliTempFile("rockyou_cli_json.txt");
+  std::string cmd = QuotePath(GetSearchBinary()) + " " + QuotePath(TestDataPath("sample.zip").string()) +
+                    " password123 --json > " + QuotePath(out.string()) + " 2>&1";
   int ret = std::system(cmd.c_str());
   EXPECT_EQ(ret, 0);
 
-  std::ifstream f("/tmp/rockyou_cli_json.txt");
+  std::ifstream f(out);
   std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
   EXPECT_NE(content.find("\"total\""), std::string::npos);
   EXPECT_NE(content.find("\"file\":\"common.txt\""), std::string::npos);
 }
 
 TEST(SearchEngineTest, CLIErrorOnMissingFileReturnsNonZero) {
-  std::string bin = GetSearchBinary();
-  std::string cmd = bin + " /nonexistent/file.zip foo > /tmp/rockyou_cli_err.txt 2>&1";
+  const auto out = CliTempFile("rockyou_cli_err.txt");
+  std::string cmd = QuotePath(GetSearchBinary()) + " nonexistent-file.zip foo > " + QuotePath(out.string()) + " 2>&1";
   int ret = std::system(cmd.c_str());
   EXPECT_NE(ret, 0);
 }
 
 TEST(SearchEngineTest, CLILongKeywordDoesNotCrash) {
-  std::string bin = GetSearchBinary();
+  const auto out = CliTempFile("rockyou_cli_long.txt");
   std::string long_kw(1000, 'a');
-  std::string zip = TestDataPath("sample.zip").string();
-  std::string cmd = bin + " " + zip + " " + long_kw + " > /tmp/rockyou_cli_long.txt 2>&1";
+  std::string cmd = QuotePath(GetSearchBinary()) + " " + QuotePath(TestDataPath("sample.zip").string()) + " " +
+                    long_kw + " > " + QuotePath(out.string()) + " 2>&1";
   int ret = std::system(cmd.c_str());
   EXPECT_GE(ret, 0);
 }
