@@ -53,11 +53,10 @@ jobs:
         run: |
           choco install ninja llvm -y --no-progress
           echo "C:/Program Files/LLVM/bin" >> "$GITHUB_PATH"
-          if [ ! -f "/c/vcpkg/installed/x64-windows/lib/libcrypto.lib" ]; then
-            vcpkg install openssl:x64-windows
+          if [ ! -f "/c/vcpkg/installed/x64-windows-static/lib/libcrypto.lib" ]; then
+            vcpkg install openssl:x64-windows-static
           fi
-          echo "CMAKE_PREFIX_PATH=C:/vcpkg/installed/x64-windows" >> "$GITHUB_ENV"
-          echo "C:/vcpkg/installed/x64-windows/bin" >> "$GITHUB_PATH"
+          echo "CMAKE_PREFIX_PATH=C:/vcpkg/installed/x64-windows-static" >> "$GITHUB_ENV"
 
       - name: Configure
         shell: bash
@@ -78,7 +77,7 @@ jobs:
                     -DCMAKE_CXX_COMPILER="${llvm}/bin/clang++"
                     -DROCKYOU_USE_HOMEBREW_LLVM=ON)
           else
-            extra+=(-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++)
+            extra+=(-DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl)
           fi
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -88,21 +87,7 @@ jobs:
         run: cmake --build build --target search search_tests
 
       - name: Test
-        shell: bash
-        run: |
-          if [ "${RUNNER_OS}" = "Windows" ]; then
-            vcpkg_bin="/c/vcpkg/installed/x64-windows/bin"
-            export PATH="${vcpkg_bin}:${PATH}"
-            shopt -s nullglob
-            dlls=("${vcpkg_bin}"/*.dll)
-            shopt -u nullglob
-            for dir in build build/bin; do
-              if [ ${#dlls[@]} -gt 0 ]; then
-                cp "${dlls[@]}" "${dir}/"
-              fi
-            done
-          fi
-          ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure
 
       - name: Package
         shell: bash
