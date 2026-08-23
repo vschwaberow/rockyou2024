@@ -94,14 +94,14 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $vcpkgBin = 'C:cpkg\installedd-windowsin'
-          $applocal = 'C:cpkg\scriptspplocal.ps1'
-          foreach ($bin in @('build\search_tests.exe', 'buildin\search.exe')) {
+          $vcpkgBin = 'C:/vcpkg/installed/x64-windows/bin'
+          $applocal = 'C:/vcpkg/scripts/applocal.ps1'
+          foreach ($bin in @('build/search_tests.exe', 'build/bin/search.exe')) {
             if (Test-Path $bin) {
               & $applocal -TargetBinary $bin -InstalledDir $vcpkgBin
             }
           }
-          $env:Path = "$vcpkgBin;C:\Program Files\LLVMin;" + $env:Path
+          $env:Path = "$vcpkgBin;C:/Program Files/LLVM/bin;" + $env:Path
           ctest --test-dir build --output-on-failure
 
       - name: Package
