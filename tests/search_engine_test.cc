@@ -490,6 +490,9 @@ std::string QuotePath(const std::string& path) {
 }
 
 TEST(SearchEngineTest, CLIHelpReturnsSuccess) {
+#if defined(_WIN32)
+  GTEST_SKIP() << "CLI shell tests require a POSIX shell";
+#endif
   const auto out = CliTempFile("rockyou_cli_help.txt");
   std::string cmd = QuotePath(GetSearchBinary()) + " --help > " + QuotePath(out.string()) + " 2>&1";
   int ret = std::system(cmd.c_str());
@@ -497,6 +500,9 @@ TEST(SearchEngineTest, CLIHelpReturnsSuccess) {
 }
 
 TEST(SearchEngineTest, CLIBasicSearchReturnsSuccessAndProducesOutput) {
+#if defined(_WIN32)
+  GTEST_SKIP() << "CLI shell tests require a POSIX shell";
+#endif
   const auto out = CliTempFile("rockyou_cli_basic.txt");
   std::string cmd = QuotePath(GetSearchBinary()) + " " + QuotePath(TestDataPath("sample.zip").string()) +
                     " password123 > " + QuotePath(out.string()) + " 2>&1";
@@ -509,6 +515,9 @@ TEST(SearchEngineTest, CLIBasicSearchReturnsSuccessAndProducesOutput) {
 }
 
 TEST(SearchEngineTest, CLIJsonFlagProducesJsonOutput) {
+#if defined(_WIN32)
+  GTEST_SKIP() << "CLI shell tests require a POSIX shell";
+#endif
   const auto out = CliTempFile("rockyou_cli_json.txt");
   std::string cmd = QuotePath(GetSearchBinary()) + " " + QuotePath(TestDataPath("sample.zip").string()) +
                     " password123 --json > " + QuotePath(out.string()) + " 2>&1";
@@ -522,6 +531,9 @@ TEST(SearchEngineTest, CLIJsonFlagProducesJsonOutput) {
 }
 
 TEST(SearchEngineTest, CLIErrorOnMissingFileReturnsNonZero) {
+#if defined(_WIN32)
+  GTEST_SKIP() << "CLI shell tests require a POSIX shell";
+#endif
   const auto out = CliTempFile("rockyou_cli_err.txt");
   std::string cmd = QuotePath(GetSearchBinary()) + " nonexistent-file.zip foo > " + QuotePath(out.string()) + " 2>&1";
   int ret = std::system(cmd.c_str());
@@ -529,6 +541,9 @@ TEST(SearchEngineTest, CLIErrorOnMissingFileReturnsNonZero) {
 }
 
 TEST(SearchEngineTest, CLILongKeywordDoesNotCrash) {
+#if defined(_WIN32)
+  GTEST_SKIP() << "CLI shell tests require a POSIX shell";
+#endif
   const auto out = CliTempFile("rockyou_cli_long.txt");
   std::string long_kw(1000, 'a');
   std::string cmd = QuotePath(GetSearchBinary()) + " " + QuotePath(TestDataPath("sample.zip").string()) + " " +
