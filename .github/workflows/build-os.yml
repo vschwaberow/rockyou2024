@@ -93,8 +93,13 @@ jobs:
           if [ "${RUNNER_OS}" = "Windows" ]; then
             vcpkg_bin="/c/vcpkg/installed/x64-windows/bin"
             export PATH="${vcpkg_bin}:${PATH}"
+            shopt -s nullglob
+            dlls=("${vcpkg_bin}"/*.dll)
+            shopt -u nullglob
             for dir in build build/bin; do
-              cp "${vcpkg_bin}"/*.dll "${dir}/" 2>/dev/null || true
+              if [ ${#dlls[@]} -gt 0 ]; then
+                cp "${dlls[@]}" "${dir}/"
+              fi
             done
           fi
           ctest --test-dir build --output-on-failure

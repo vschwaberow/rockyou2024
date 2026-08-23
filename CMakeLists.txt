@@ -102,10 +102,6 @@ if(APPLE AND ROCKYOU_USE_HOMEBREW_LLVM)
   set(ROCKYOU_HOMEBREW_CXX_INC "${ROCKYOU_HOMEBREW_LLVM}/include/c++/v1")
 endif()
 
-if(WIN32)
-  set(OPENSSL_USE_STATIC_LIBS ON CACHE BOOL "" FORCE)
-endif()
-
 find_package(OpenSSL REQUIRED)
 add_library(search_core STATIC)
 
