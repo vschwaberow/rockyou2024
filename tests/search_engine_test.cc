@@ -311,7 +311,6 @@ TEST(SearchEngineTest, SearchZipPerFileLimitAffectsResults) {
   EXPECT_NE(output.find("\"per_file_limit\":1"), std::string::npos);
 }
 
-
 TEST(SearchEngineTest, ZipArchiveReusesHandleAcrossEntries) {
   const auto index_res = rockyou::BuildZipIndex(TestDataPath("sample.zip").string());
   ASSERT_TRUE(index_res.has_value()) << index_res.error().message;
@@ -485,9 +484,7 @@ std::filesystem::path CliTempFile(const char* name) {
   return std::filesystem::path(tmp) / name;
 }
 
-std::string QuotePath(const std::string& path) {
-  return "\"" + path + "\"";
-}
+std::string QuotePath(const std::string& path) { return "\"" + path + "\""; }
 
 TEST(SearchEngineTest, CLIHelpReturnsSuccess) {
 #if defined(_WIN32)
@@ -732,7 +729,6 @@ TEST(RegexEngineTest, RegexSearchWithPerFileLimit) {
   EXPECT_NE(output.find("truncated"), std::string::npos);
 }
 
-
 TEST(RegexEngineTest, RegexSearchWithLiteralPrefixFindsMatch) {
   testing::internal::CaptureStdout();
   rockyou::SearchOptions options;
@@ -752,7 +748,6 @@ TEST(RegexEngineTest, RegexSearchWithoutLiteralPrefixFindsSameMatch) {
   ASSERT_TRUE(status.has_value()) << status.error().message;
   EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);
 }
-
 
 TEST(RegexEngineTest, RegexSearchCaseSensitiveMissesDifferentCase) {
   testing::internal::CaptureStdout();
@@ -774,7 +769,6 @@ TEST(RegexEngineTest, RegexSearchCaseInsensitiveFindsDifferentCase) {
   ASSERT_TRUE(status.has_value()) << status.error().message;
   EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);
 }
-
 
 TEST(RegexEngineTest, EstimateMinMatchLengthStarIsZero) {
   auto compiled = rockyou::CompileRegexPattern("a*");
@@ -800,6 +794,16 @@ TEST(RegexEngineTest, RegexSearchChunkOverlapCatchesBoundaryMatch) {
   options.regex = true;
   options.chunk_size = 6;
   auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "d123 g", options);
+  const std::string output = testing::internal::GetCapturedStdout();
+  ASSERT_TRUE(status.has_value()) << status.error().message;
+  EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);
+}
+
+TEST(SearchEngineTest, SearchWithChunkSizeSmallerThanEntryUsesStreaming) {
+  testing::internal::CaptureStdout();
+  rockyou::SearchOptions options;
+  options.chunk_size = 4;
+  auto status = rockyou::SearchZip(TestDataPath("sample.zip").string(), "password123", options);
   const std::string output = testing::internal::GetCapturedStdout();
   ASSERT_TRUE(status.has_value()) << status.error().message;
   EXPECT_NE(output.find("Occurrences in \"common.txt\": 1"), std::string::npos);

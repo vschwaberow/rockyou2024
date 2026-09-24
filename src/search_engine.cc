@@ -55,7 +55,7 @@ using rockyou::AppError; // ensure visible inside the namespace for all declarat
 namespace {
 
 constexpr size_t kDefaultChunkSize = 1024 * 1024;
-constexpr size_t kDefaultMinFileSizeForBuffer = 10 * 1024 * 1024;
+constexpr size_t kDefaultMaxInMemoryFileSize = 10 * 1024 * 1024;
 constexpr int kDefaultContextSize = 20;
 constexpr size_t kRegexUnknownOverlap = 65536;
 
@@ -139,9 +139,8 @@ std::vector<RegexMatch> SearchMatchesHybrid(std::string_view text, const RegexPa
     for (const auto& match : matches) {
       size_t absolute_pos = scan_start + match.position;
       if (absolute_pos >= accept_lo && absolute_pos < accept_hi) {
-        verified.push_back(RegexMatch{.position = absolute_pos,
-                                      .length = match.length,
-                                      .matched_text = match.matched_text});
+        verified.push_back(
+            RegexMatch{.position = absolute_pos, .length = match.length, .matched_text = match.matched_text});
       }
     }
   }
@@ -473,7 +472,7 @@ std::expected<void, rockyou::AppError> ValidateChecksum(const std::string& path,
 std::expected<SearchResult, rockyou::AppError>
 SearchFile(ZipArchive& archive, const std::string& name, const ZipIndexEntry& entry, const std::string& keyword,
            std::string_view pattern, bool case_insensitive, size_t chunk_size, size_t context_size,
-           size_t min_buffer_size, std::optional<int> per_file_limit, bool highlight) {
+           size_t max_in_memory_file_size, std::optional<int> per_file_limit, bool highlight) {
   auto open_res = archive.OpenEntry(name, entry);
   if (!open_res) {
     return std::unexpected(open_res.error());
@@ -484,7 +483,7 @@ SearchFile(ZipArchive& archive, const std::string& name, const ZipIndexEntry& en
     return result;
   }
   const size_t keyword_length = keyword.size();
-  if (entry.size >= min_buffer_size) {
+  if (entry.size <= max_in_memory_file_size) {
     std::string buffer(entry.size, '\0');
     size_t total = 0;
     while (total < buffer.size()) {
@@ -511,6 +510,10 @@ SearchFile(ZipArchive& archive, const std::string& name, const ZipIndexEntry& en
         result.truncated = true;
         break;
       }
+    }
+    auto close_status = archive.CloseEntryWithStatus();
+    if (!close_status) {
+      return std::unexpected(close_status.error());
     }
     return result;
   }
@@ -569,7 +572,7 @@ SearchFile(ZipArchive& archive, const std::string& name, const ZipIndexEntry& en
 std::expected<SearchResult, rockyou::AppError> SearchFileRegex(ZipArchive& archive, const std::string& name,
                                                                const ZipIndexEntry& entry,
                                                                const RegexPattern& regex_pattern, size_t chunk_size,
-                                                               size_t context_size, size_t min_buffer_size,
+                                                               size_t context_size, size_t max_in_memory_file_size,
                                                                std::optional<int> per_file_limit, bool highlight) {
   auto open_res = archive.OpenEntry(name, entry);
   if (!open_res) {
@@ -578,7 +581,7 @@ std::expected<SearchResult, rockyou::AppError> SearchFileRegex(ZipArchive& archi
   SearchResult result;
   result.filename = name;
 
-  if (entry.size >= min_buffer_size) {
+  if (entry.size <= max_in_memory_file_size) {
     std::string buffer(entry.size, '\0');
     size_t total = 0;
     while (total < buffer.size()) {
@@ -607,6 +610,10 @@ std::expected<SearchResult, rockyou::AppError> SearchFileRegex(ZipArchive& archi
         result.truncated = true;
         break;
       }
+    }
+    auto close_status = archive.CloseEntryWithStatus();
+    if (!close_status) {
+      return std::unexpected(close_status.error());
     }
     return result;
   }
@@ -695,7 +702,7 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
     return std::unexpected(MakeError(ErrorCode::SearchError, std::string(kInvalidContextSizeError)));
   }
   const size_t chunk_size = options.chunk_size.value_or(kDefaultChunkSize);
-  const size_t min_buffer_size = kDefaultMinFileSizeForBuffer;
+  const size_t max_in_memory_file_size = kDefaultMaxInMemoryFileSize;
   const size_t context_size = options.context_size.value_or(static_cast<size_t>(kDefaultContextSize));
 
   std::optional<RegexPattern> regex_pattern;
@@ -784,12 +791,13 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
           }
           ZipArchive& archive = *archive_or;
           if (regex_pattern.has_value()) {
-            result_or = SearchFileRegex(archive, entry.first, entry.second, regex_pattern.value(), chunk_size,
-                                        context_size, min_buffer_size, options.per_file_limit, options.highlight);
+            result_or =
+                SearchFileRegex(archive, entry.first, entry.second, regex_pattern.value(), chunk_size, context_size,
+                                max_in_memory_file_size, options.per_file_limit, options.highlight);
           } else {
             result_or =
                 SearchFile(archive, entry.first, entry.second, keyword, pattern, options.case_insensitive, chunk_size,
-                           context_size, min_buffer_size, options.per_file_limit, options.highlight);
+                           context_size, max_in_memory_file_size, options.per_file_limit, options.highlight);
           }
           if (!result_or) {
             errors[idx] = std::format(kErrorProcessingFormat, entry.first, result_or.error().message);
@@ -943,18 +951,16 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
     const std::chrono::duration<double, std::milli> total_ms = t3 - t0;
     const double search_seconds = elapsed.count();
     const double throughput_mbps =
-        search_seconds > 0.0
-            ? static_cast<double>(bytes_decompressed) / (search_seconds * 1024.0 * 1024.0)
-            : 0.0;
+        search_seconds > 0.0 ? static_cast<double>(bytes_decompressed) / (search_seconds * 1024.0 * 1024.0) : 0.0;
     const size_t searched_count = finalized.size();
     const size_t skipped_count = entries.size() - searched_count;
 
     std::println(stderr, "--- Statistics ---");
-    std::println(stderr, "Entries: {} total, {} searched, {} skipped, {} errors", entries.size(),
-                 searched_count, skipped_count, error_messages.size());
+    std::println(stderr, "Entries: {} total, {} searched, {} skipped, {} errors", entries.size(), searched_count,
+                 skipped_count, error_messages.size());
     std::println(stderr, "Bytes decompressed: {}", bytes_decompressed);
-    std::println(stderr, "Timing: init={:.1f}ms search={:.1f}ms finalize={:.1f}ms total={:.1f}ms",
-                 init_ms.count(), search_ms.count(), finalize_ms.count(), total_ms.count());
+    std::println(stderr, "Timing: init={:.1f}ms search={:.1f}ms finalize={:.1f}ms total={:.1f}ms", init_ms.count(),
+                 search_ms.count(), finalize_ms.count(), total_ms.count());
     std::println(stderr, "Throughput: {:.1f} MB/s", throughput_mbps);
 
     std::vector<std::pair<std::string_view, size_t>> top_entries;
@@ -962,8 +968,7 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
       top_entries.emplace_back(r.filename, r.occurrences.size());
     }
     const size_t top_n = std::min(top_entries.size(), static_cast<size_t>(5));
-    std::partial_sort(top_entries.begin(), top_entries.begin() + static_cast<std::ptrdiff_t>(top_n),
-                      top_entries.end(),
+    std::partial_sort(top_entries.begin(), top_entries.begin() + static_cast<std::ptrdiff_t>(top_n), top_entries.end(),
                       [](const auto& a, const auto& b) { return a.second > b.second; });
     std::println(stderr, "Top entries by hits:");
     for (size_t i = 0; i < top_n; ++i) {
