@@ -238,85 +238,63 @@ std::string EscapeJson(std::string_view input) {
 std::string BuildJson(const std::vector<SearchResult>& results, int total_occurrences, bool truncated,
                       const std::vector<std::string>& errors, const SearchOptions& options, bool partial_failure) {
   std::string json;
-  json.append("{\"total\":");
-  json.append(std::to_string(total_occurrences));
-  json.append(",\"truncated\":");
-  json.append(truncated ? "true" : "false");
-  json.append(",\"partial_failure\":");
-  json.append(partial_failure ? "true" : "false");
-  json.append(",\"params\":{");
-  json.append("\"case_insensitive\":");
-  json.append(options.case_insensitive ? "true" : "false");
-  json.append(",\"quiet\":");
-  json.append(options.quiet ? "true" : "false");
-  json.append(",\"limit\":");
+  size_t estimated_size = 256 + errors.size() * 64;
+  for (const auto& r : results) {
+    estimated_size += 64 + r.filename.size() + r.occurrences.size() * 80;
+  }
+  json.reserve(estimated_size);
+
+  std::format_to(std::back_inserter(json),
+                 "{{\"total\":{},\"truncated\":{},\"partial_failure\":{},\"params\":{{"
+                 "\"case_insensitive\":{},\"quiet\":{},",
+                 total_occurrences, truncated ? "true" : "false", partial_failure ? "true" : "false",
+                 options.case_insensitive ? "true" : "false", options.quiet ? "true" : "false");
+
   if (options.limit.has_value()) {
-    json.append(std::to_string(options.limit.value()));
+    std::format_to(std::back_inserter(json), "\"limit\":{},", *options.limit);
   } else {
-    json.append("null");
+    json.append("\"limit\":null,");
   }
-  json.append(",\"per_file_limit\":");
   if (options.per_file_limit.has_value()) {
-    json.append(std::to_string(options.per_file_limit.value()));
+    std::format_to(std::back_inserter(json), "\"per_file_limit\":{},", *options.per_file_limit);
   } else {
-    json.append("null");
+    json.append("\"per_file_limit\":null,");
   }
-  json.append(",\"threads\":");
   if (options.thread_count.has_value()) {
-    json.append(std::to_string(options.thread_count.value()));
+    std::format_to(std::back_inserter(json), "\"threads\":{},", *options.thread_count);
   } else {
-    json.append("null");
+    json.append("\"threads\":null,");
   }
-  json.append(",\"chunk\":");
   if (options.chunk_size.has_value()) {
-    json.append(std::to_string(options.chunk_size.value()));
+    std::format_to(std::back_inserter(json), "\"chunk\":{},", *options.chunk_size);
   } else {
-    json.append("null");
+    json.append("\"chunk\":null,");
   }
-  json.append(",\"context\":");
   if (options.context_size.has_value()) {
-    json.append(std::to_string(options.context_size.value()));
+    std::format_to(std::back_inserter(json), "\"context\":{},", *options.context_size);
   } else {
-    json.append("null");
+    json.append("\"context\":null,");
   }
-  json.append(",\"regex\":");
-  json.append(options.regex ? "true" : "false");
-  json.append(",\"regex_mode\":");
-  if (options.regex_mode.has_value()) {
-    json.append("\"");
-    json.append(EscapeJson(options.regex_mode.value()));
-    json.append("\"");
-  } else {
-    json.append("\"\"");
-  }
-  json.append("},\"results\":[");
+  std::format_to(std::back_inserter(json), "\"regex\":{},\"regex_mode\":\"{}\"}},\"results\":[",
+                 options.regex ? "true" : "false",
+                 options.regex_mode.has_value() ? EscapeJson(*options.regex_mode) : "");
+
   for (size_t i = 0; i < results.size(); ++i) {
     const auto& r = results[i];
-    json.append("{\"file\":\"");
-    json.append(EscapeJson(r.filename));
-    json.append("\",\"count\":");
-    json.append(std::to_string(r.occurrences.size()));
-    json.append(",\"truncated\":");
-    json.append(r.truncated ? "true" : "false");
-    json.append(",\"occurrences\":[");
+    std::format_to(std::back_inserter(json), "{{\"file\":\"{}\",\"count\":{},\"truncated\":{},\"occurrences\":[",
+                   EscapeJson(r.filename), r.occurrences.size(), r.truncated ? "true" : "false");
+
     for (size_t j = 0; j < r.occurrences.size(); ++j) {
-      const auto& occ = r.occurrences[j];
-      json.append("{\"line\":");
-      json.append(std::to_string(std::get<0>(occ)));
-      json.append(",\"column\":");
-      json.append(std::to_string(std::get<1>(occ)));
-      json.append(",\"context\":\"");
-      json.append(EscapeJson(std::get<2>(occ)));
-      json.append("\"}");
+      const auto& [line, column, context] = r.occurrences[j];
+      std::format_to(std::back_inserter(json), "{{\"line\":{},\"column\":{},\"context\":\"{}\"}}", line, column,
+                     EscapeJson(context));
       if (j + 1 < r.occurrences.size()) {
         json.push_back(',');
       }
     }
-    json.append("}");
+    json.append("]");
     if (!r.error.empty()) {
-      json.append(",\"error\":\"");
-      json.append(EscapeJson(r.error));
-      json.append("\"");
+      std::format_to(std::back_inserter(json), ",\"error\":\"{}\"", EscapeJson(r.error));
     }
     json.append("}");
     if (i + 1 < results.size()) {
@@ -325,9 +303,7 @@ std::string BuildJson(const std::vector<SearchResult>& results, int total_occurr
   }
   json.append("],\"errors\":[");
   for (size_t i = 0; i < errors.size(); ++i) {
-    json.append("\"");
-    json.append(EscapeJson(errors[i]));
-    json.append("\"");
+    std::format_to(std::back_inserter(json), "\"{}\"", EscapeJson(errors[i]));
     if (i + 1 < errors.size()) {
       json.push_back(',');
     }
@@ -913,10 +889,7 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
     std::println("{}", json_output);
   } else if (options.quiet) {
     for (const auto& result : finalized) {
-      for (const auto& occurrence : result.occurrences) {
-        const int line = std::get<0>(occurrence);
-        const int column = std::get<1>(occurrence);
-        const std::string& context = std::get<2>(occurrence);
+      for (const auto& [line, column, context] : result.occurrences) {
         std::println("{}:{}:{}:{}", result.filename, line, column, context);
       }
     }
@@ -929,10 +902,7 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
       if (result.truncated) {
         std::println("  {}", rockyou::kResultsTruncatedMessage);
       }
-      for (const auto& occurrence : result.occurrences) {
-        const int line = std::get<0>(occurrence);
-        const int column = std::get<1>(occurrence);
-        const std::string& context = std::get<2>(occurrence);
+      for (const auto& [line, column, context] : result.occurrences) {
         std::println(kOccurrenceDetailFormat, line, column, context);
       }
     }

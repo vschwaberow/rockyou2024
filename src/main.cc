@@ -33,12 +33,11 @@ template <typename T> bool ParsePositive(std::string_view text, T* value) {
 } // namespace
 
 int main(int argc, char* argv[]) {
-  rockyou::PrintHeader();
   rockyou::SearchOptions options;
   std::string keyword;
   std::string filename;
-  rockyou::SearchOptions default_options; // for scope
   if (argc == 2 && std::string_view(argv[1]) == rockyou::kInteractiveFlag) {
+    rockyou::PrintHeader();
     std::println("{}", rockyou::kInteractiveHelp);
     while (true) {
       std::print("{}", rockyou::kInteractivePromptAction);
@@ -153,6 +152,7 @@ int main(int argc, char* argv[]) {
         }
         ++i;
       } else if (arg == "--help") {
+        rockyou::PrintHeader();
         rockyou::PrintUsage(argv[0]);
         return 0;
       } else if (!arg.empty() && arg.front() == '-') {
@@ -178,6 +178,9 @@ int main(int argc, char* argv[]) {
   if (fs_error || !exists) {
     std::print(stderr, rockyou::kFileMissingFormat, filename);
     return 1;
+  }
+  if (options.ShouldPrintBanner()) {
+    rockyou::PrintHeader();
   }
   auto res = rockyou::SearchZip(filename, keyword, options);
   if (!res) {

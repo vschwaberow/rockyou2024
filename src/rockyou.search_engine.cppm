@@ -47,6 +47,8 @@ struct SearchOptions {
   std::optional<size_t> context_size;
   std::optional<std::string> checksum;
   std::optional<std::string> regex_mode;
+
+  [[nodiscard]] constexpr bool ShouldPrintBanner() const noexcept { return !quiet && !json && !count; }
 };
 
 Result<void> SearchZip(const std::string& path, const std::string& keyword, const SearchOptions& options);
