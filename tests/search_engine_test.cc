@@ -30,6 +30,16 @@ TEST(SearchEngineTest, BuildZipIndexEnumeratesEntries) {
   EXPECT_NE(index.find("nested/other.txt"), index.end());
 }
 
+TEST(SearchEngineTest, BuildZipIndexPopulatesPositiveSizesAndOffsets) {
+  const auto index_res = rockyou::BuildZipIndex(TestDataPath("sample.zip").string());
+  ASSERT_TRUE(index_res.has_value()) << index_res.error().message;
+  const auto& index = *index_res;
+  for (const auto& [name, entry] : index) {
+    EXPECT_GT(entry.size, 0u);
+    EXPECT_GT(entry.offset, 0u);
+  }
+}
+
 TEST(SearchEngineTest, SearchZipFindsCaseSensitiveMatch) {
   testing::internal::CaptureStdout();
   rockyou::SearchOptions options;

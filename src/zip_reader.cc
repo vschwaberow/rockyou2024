@@ -4,6 +4,7 @@
 module;
 
 #include <print>
+#include <array>
 #include <cstddef>
 #include <expected>
 #include <filesystem>
@@ -87,8 +88,8 @@ Result<ZipIndex> BuildZipIndex(const std::string& path) {
   }
   ZipFile zip = *std::move(zip_or);
 
-  unz_global_info global_info;
-  if (unzGetGlobalInfo(zip.get(), &global_info) != UNZ_OK) {
+  unz_global_info64 global_info{};
+  if (unzGetGlobalInfo64(zip.get(), &global_info) != UNZ_OK) {
     return std::unexpected(rockyou::MakeError(rockyou::ErrorCode::ZipError, std::string(rockyou::kZipInfoError)));
   }
   if (global_info.number_entry == 0) {
@@ -98,24 +99,29 @@ Result<ZipIndex> BuildZipIndex(const std::string& path) {
     return std::unexpected(rockyou::MakeError(rockyou::ErrorCode::ZipError, std::string(rockyou::kZipFirstFileError)));
   }
 
+  constexpr size_t kMaxZipFilenameLength = 1024;
   ZipIndex index;
+
   for (std::uint64_t i = 0; i < global_info.number_entry; ++i) {
-    char filename_inzip[256];
-    unz_file_info file_info;
-    if (unzGetCurrentFileInfo(zip.get(), &file_info, filename_inzip, sizeof(filename_inzip), nullptr, 0, nullptr, 0) !=
-        UNZ_OK) {
+    std::array<char, kMaxZipFilenameLength> filename_buffer{};
+    unz_file_info64 file_info{};
+    if (unzGetCurrentFileInfo64(zip.get(), &file_info, filename_buffer.data(),
+                                static_cast<unsigned long>(filename_buffer.size() - 1), nullptr, 0, nullptr,
+                                0) != UNZ_OK) {
       return std::unexpected(rockyou::MakeError(rockyou::ErrorCode::ZipError, std::string(rockyou::kZipFileInfoError)));
     }
+    filename_buffer.back() = '\0';
 
-    std::uint64_t file_offset = unzGetOffset(zip.get());
+    const int64_t raw_offset = unzGetOffset64(zip.get());
+    const uint64_t file_offset = raw_offset > 0 ? static_cast<uint64_t>(raw_offset) : 0;
     if (file_offset == 0) {
-      std::println(stderr, kZipOffsetWarning, filename_inzip);
+      std::println(stderr, kZipOffsetWarning, filename_buffer.data());
     }
 
-    ZipIndexEntry entry;
-    entry.offset = static_cast<size_t>(file_offset);
-    entry.size = static_cast<size_t>(file_info.uncompressed_size);
-    index[filename_inzip] = entry;
+    index.try_emplace(filename_buffer.data(), ZipIndexEntry{
+                                                  .offset = static_cast<size_t>(file_offset),
+                                                  .size = static_cast<size_t>(file_info.uncompressed_size),
+                                              });
 
     if (i + 1 < global_info.number_entry) {
       if (unzGoToNextFile(zip.get()) != UNZ_OK) {
@@ -126,7 +132,6 @@ Result<ZipIndex> BuildZipIndex(const std::string& path) {
   }
   return index;
 }
-
 
 ZipArchive::ZipArchive(unzFile handle) : handle_(handle), size_(0), entry_open_(false) {}
 
