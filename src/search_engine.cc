@@ -29,6 +29,7 @@ module;
 #include <ranges>
 #include <set>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -181,16 +182,16 @@ std::vector<RegexMatch> SearchMatchesHybrid(std::string_view text, const RegexPa
   return verified;
 }
 
-void AppendNewlines(std::string_view chunk, size_t base_offset, std::vector<size_t>* newline_offsets) {
+void AppendNewlines(std::string_view chunk, size_t base_offset, std::vector<size_t>& newline_offsets) {
   for (size_t i = 0; i < chunk.size(); ++i) {
     if (chunk[i] == '\n') {
-      newline_offsets->push_back(base_offset + i);
+      newline_offsets.push_back(base_offset + i);
     }
   }
 }
 
-std::pair<int, int> ComputeLineColumn(const std::vector<size_t>& newline_offsets, size_t position) {
-  auto it = std::upper_bound(newline_offsets.begin(), newline_offsets.end(), position);
+[[nodiscard]] std::pair<int, int> ComputeLineColumn(std::span<const size_t> newline_offsets, size_t position) noexcept {
+  auto it = std::ranges::upper_bound(newline_offsets, position);
   const size_t count = static_cast<size_t>(it - newline_offsets.begin());
   const int line = static_cast<int>(count + 1);
   if (count == 0) {
@@ -200,14 +201,15 @@ std::pair<int, int> ComputeLineColumn(const std::vector<size_t>& newline_offsets
   return {line, static_cast<int>(position - last_break)};
 }
 
-std::string BuildContext(std::string_view source, size_t match_offset, size_t keyword_length, size_t context_size) {
+[[nodiscard]] std::string BuildContext(std::string_view source, size_t match_offset, size_t keyword_length,
+                                       size_t context_size) {
   const size_t start = match_offset > context_size ? match_offset - context_size : 0;
   const size_t end = std::min(match_offset + keyword_length + context_size, source.size());
   return std::string(source.substr(start, end - start));
 }
 
-std::string BuildHighlightedContext(std::string_view source, size_t match_offset, size_t keyword_length,
-                                    size_t context_size, bool highlight) {
+[[nodiscard]] std::string BuildHighlightedContext(std::string_view source, size_t match_offset, size_t keyword_length,
+                                                  size_t context_size, bool highlight) {
   std::string context = BuildContext(source, match_offset, keyword_length, context_size);
   if (!highlight) {
     return context;
@@ -223,7 +225,7 @@ std::string BuildHighlightedContext(std::string_view source, size_t match_offset
   return context;
 }
 
-std::string EscapeJson(std::string_view input) {
+[[nodiscard]] std::string EscapeJson(std::string_view input) {
   std::string escaped;
   escaped.reserve(input.size() + 8);
   for (char c : input) {
@@ -257,8 +259,9 @@ std::string EscapeJson(std::string_view input) {
   return escaped;
 }
 
-std::string BuildJson(const std::vector<SearchResult>& results, int total_occurrences, bool truncated,
-                      const std::vector<std::string>& errors, const SearchOptions& options, bool partial_failure) {
+[[nodiscard]] std::string BuildJson(const std::vector<SearchResult>& results, int total_occurrences, bool truncated,
+                                    const std::vector<std::string>& errors, const SearchOptions& options,
+                                    bool partial_failure) {
   std::string json;
   size_t estimated_size = 256 + errors.size() * 64;
   for (const auto& r : results) {
@@ -469,11 +472,10 @@ std::expected<void, rockyou::AppError> ValidateChecksum(const std::string& path,
   return compare_hex(expectation->algorithm, expectation->hex);
 }
 
-std::expected<SearchResult, rockyou::AppError> SearchFile(ZipArchive& archive, const std::string& name,
-                                                          const ZipIndexEntry& entry, const std::string& keyword,
-                                                          const BoyerMooreMatcher& matcher, size_t chunk_size,
-                                                          size_t context_size, size_t max_in_memory_file_size,
-                                                          std::optional<int> per_file_limit, bool highlight) {
+std::expected<SearchResult, rockyou::AppError>
+SearchFile(ZipArchive& archive, const std::string& name, const ZipIndexEntry& entry, const std::string& keyword,
+           const BoyerMooreMatcher& matcher, size_t chunk_size, size_t context_size, size_t max_in_memory_file_size,
+           std::optional<int> per_file_limit, bool highlight, std::stop_token stop_token = {}) {
   auto open_res = archive.OpenEntry(name, entry);
   if (!open_res) {
     return std::unexpected(open_res.error());
@@ -485,11 +487,15 @@ std::expected<SearchResult, rockyou::AppError> SearchFile(ZipArchive& archive, c
   }
   const size_t keyword_length = keyword.size();
   if (entry.size <= max_in_memory_file_size) {
-    std::string buffer(entry.size, '\0');
+    auto buffer = std::make_unique_for_overwrite<char[]>(entry.size);
     size_t total = 0;
-    while (total < buffer.size()) {
-      const size_t remaining = buffer.size() - total;
-      auto read_or = archive.Read(buffer.data() + total, static_cast<unsigned int>(remaining));
+    while (total < entry.size) {
+      if (stop_token.stop_requested()) {
+        result.truncated = true;
+        break;
+      }
+      const size_t remaining = entry.size - total;
+      auto read_or = archive.Read(buffer.get() + total, static_cast<unsigned int>(remaining));
       if (!read_or) {
         return std::unexpected(read_or.error());
       }
@@ -499,13 +505,25 @@ std::expected<SearchResult, rockyou::AppError> SearchFile(ZipArchive& archive, c
       }
       total += static_cast<size_t>(read_bytes);
     }
-    buffer.resize(total);
+    if (stop_token.stop_requested()) {
+      result.truncated = true;
+      auto close_status = archive.CloseEntryWithStatus();
+      if (!close_status) {
+        return std::unexpected(close_status.error());
+      }
+      return result;
+    }
+    const std::string_view file_view(buffer.get(), total);
     std::vector<size_t> newline_offsets;
-    AppendNewlines(buffer, 0, &newline_offsets);
-    const auto positions = matcher.Search(buffer);
+    AppendNewlines(file_view, 0, newline_offsets);
+    const auto positions = matcher.Search(file_view);
     for (size_t pos : positions) {
+      if (stop_token.stop_requested()) {
+        result.truncated = true;
+        break;
+      }
       const auto line_column = ComputeLineColumn(newline_offsets, pos);
-      const std::string context = BuildHighlightedContext(buffer, pos, keyword_length, context_size, highlight);
+      const std::string context = BuildHighlightedContext(file_view, pos, keyword_length, context_size, highlight);
       result.occurrences.emplace_back(line_column.first, line_column.second, context);
       if (per_file_limit.has_value() && static_cast<int>(result.occurrences.size()) >= per_file_limit.value()) {
         result.truncated = true;
@@ -519,11 +537,13 @@ std::expected<SearchResult, rockyou::AppError> SearchFile(ZipArchive& archive, c
     return result;
   }
   std::vector<size_t> newline_offsets;
-  std::vector<char> buffer(chunk_size);
+  auto buffer = std::make_unique_for_overwrite<char[]>(chunk_size);
   std::string overlap;
+  std::string search_text;
+  search_text.reserve(chunk_size + keyword_length);
   size_t processed = 0;
-  while (true) {
-    auto read_or = archive.Read(buffer.data(), static_cast<unsigned int>(buffer.size()));
+  while (!stop_token.stop_requested()) {
+    auto read_or = archive.Read(buffer.get(), static_cast<unsigned int>(chunk_size));
     if (!read_or) {
       return std::unexpected(read_or.error());
     }
@@ -531,14 +551,20 @@ std::expected<SearchResult, rockyou::AppError> SearchFile(ZipArchive& archive, c
     if (read_bytes == 0) {
       break;
     }
-    std::string chunk(buffer.data(), static_cast<size_t>(read_bytes));
-    AppendNewlines(chunk, processed, &newline_offsets);
+    const std::string_view chunk(buffer.get(), static_cast<size_t>(read_bytes));
+    AppendNewlines(chunk, processed, newline_offsets);
     const size_t prefix_length = overlap.size();
     const size_t base = processed >= prefix_length ? processed - prefix_length : 0;
-    std::string search_text = overlap + chunk;
+    search_text.clear();
+    search_text.append(overlap);
+    search_text.append(chunk);
     const auto positions = matcher.Search(search_text);
     const size_t threshold = processed >= prefix_length ? processed - prefix_length : 0;
     for (size_t pos : positions) {
+      if (stop_token.stop_requested()) {
+        result.truncated = true;
+        break;
+      }
       const size_t absolute = base + pos;
       if (absolute < threshold) {
         continue;
@@ -550,6 +576,9 @@ std::expected<SearchResult, rockyou::AppError> SearchFile(ZipArchive& archive, c
         result.truncated = true;
         break;
       }
+    }
+    if (result.truncated || stop_token.stop_requested()) {
+      break;
     }
     processed += static_cast<size_t>(read_bytes);
     if (keyword_length <= 1) {
@@ -563,6 +592,9 @@ std::expected<SearchResult, rockyou::AppError> SearchFile(ZipArchive& archive, c
       }
     }
   }
+  if (stop_token.stop_requested()) {
+    result.truncated = true;
+  }
   auto close_status = archive.CloseEntryWithStatus();
   if (!close_status) {
     return std::unexpected(close_status.error());
@@ -574,7 +606,7 @@ std::expected<SearchResult, rockyou::AppError>
 SearchFileRegex(ZipArchive& archive, const std::string& name, const ZipIndexEntry& entry,
                 const RegexPattern& regex_pattern, const std::optional<BoyerMooreMatcher>& prefix_matcher,
                 size_t chunk_size, size_t context_size, size_t max_in_memory_file_size,
-                std::optional<int> per_file_limit, bool highlight) {
+                std::optional<int> per_file_limit, bool highlight, std::stop_token stop_token = {}) {
   auto open_res = archive.OpenEntry(name, entry);
   if (!open_res) {
     return std::unexpected(open_res.error());
@@ -583,11 +615,15 @@ SearchFileRegex(ZipArchive& archive, const std::string& name, const ZipIndexEntr
   result.filename = name;
 
   if (entry.size <= max_in_memory_file_size) {
-    std::string buffer(entry.size, '\0');
+    auto buffer = std::make_unique_for_overwrite<char[]>(entry.size);
     size_t total = 0;
-    while (total < buffer.size()) {
-      const size_t remaining = buffer.size() - total;
-      auto read_or = archive.Read(buffer.data() + total, static_cast<unsigned int>(remaining));
+    while (total < entry.size) {
+      if (stop_token.stop_requested()) {
+        result.truncated = true;
+        break;
+      }
+      const size_t remaining = entry.size - total;
+      auto read_or = archive.Read(buffer.get() + total, static_cast<unsigned int>(remaining));
       if (!read_or) {
         return std::unexpected(read_or.error());
       }
@@ -597,15 +633,27 @@ SearchFileRegex(ZipArchive& archive, const std::string& name, const ZipIndexEntr
       }
       total += static_cast<size_t>(read_bytes);
     }
-    buffer.resize(total);
+    if (stop_token.stop_requested()) {
+      result.truncated = true;
+      auto close_status = archive.CloseEntryWithStatus();
+      if (!close_status) {
+        return std::unexpected(close_status.error());
+      }
+      return result;
+    }
+    const std::string_view file_view(buffer.get(), total);
     std::vector<size_t> newline_offsets;
-    AppendNewlines(buffer, 0, &newline_offsets);
+    AppendNewlines(file_view, 0, newline_offsets);
 
-    const auto matches = SearchMatchesHybrid(buffer, regex_pattern, prefix_matcher);
+    const auto matches = SearchMatchesHybrid(file_view, regex_pattern, prefix_matcher);
     for (const auto& match : matches) {
+      if (stop_token.stop_requested()) {
+        result.truncated = true;
+        break;
+      }
       const auto line_column = ComputeLineColumn(newline_offsets, match.position);
       const std::string context =
-          BuildHighlightedContext(buffer, match.position, match.length, context_size, highlight);
+          BuildHighlightedContext(file_view, match.position, match.length, context_size, highlight);
       result.occurrences.emplace_back(line_column.first, line_column.second, context);
       if (per_file_limit.has_value() && static_cast<int>(result.occurrences.size()) >= per_file_limit.value()) {
         result.truncated = true;
@@ -620,12 +668,14 @@ SearchFileRegex(ZipArchive& archive, const std::string& name, const ZipIndexEntr
   }
 
   std::vector<size_t> newline_offsets;
-  std::vector<char> buffer(chunk_size);
+  auto buffer = std::make_unique_for_overwrite<char[]>(chunk_size);
   std::string overlap;
+  std::string search_text;
+  search_text.reserve(chunk_size + 256);
   size_t processed = 0;
 
-  while (true) {
-    auto read_or = archive.Read(buffer.data(), static_cast<unsigned int>(buffer.size()));
+  while (!stop_token.stop_requested()) {
+    auto read_or = archive.Read(buffer.get(), static_cast<unsigned int>(chunk_size));
     if (!read_or) {
       return std::unexpected(read_or.error());
     }
@@ -634,17 +684,23 @@ SearchFileRegex(ZipArchive& archive, const std::string& name, const ZipIndexEntr
       break;
     }
 
-    std::string chunk(buffer.data(), static_cast<size_t>(read_bytes));
-    AppendNewlines(chunk, processed, &newline_offsets);
+    const std::string_view chunk(buffer.get(), static_cast<size_t>(read_bytes));
+    AppendNewlines(chunk, processed, newline_offsets);
 
     const size_t prefix_length = overlap.size();
     const size_t base = processed >= prefix_length ? processed - prefix_length : 0;
-    std::string search_text = overlap + chunk;
+    search_text.clear();
+    search_text.append(overlap);
+    search_text.append(chunk);
 
     const auto matches = SearchMatchesHybrid(search_text, regex_pattern, prefix_matcher);
     const size_t threshold = processed >= prefix_length ? processed - prefix_length : 0;
 
     for (const auto& match : matches) {
+      if (stop_token.stop_requested()) {
+        result.truncated = true;
+        break;
+      }
       const size_t absolute = base + match.position;
       if (absolute < threshold) {
         continue;
@@ -657,6 +713,9 @@ SearchFileRegex(ZipArchive& archive, const std::string& name, const ZipIndexEntr
         result.truncated = true;
         break;
       }
+    }
+    if (result.truncated || stop_token.stop_requested()) {
+      break;
     }
 
     processed += static_cast<size_t>(read_bytes);
@@ -673,6 +732,9 @@ SearchFileRegex(ZipArchive& archive, const std::string& name, const ZipIndexEntr
     }
   }
 
+  if (stop_token.stop_requested()) {
+    result.truncated = true;
+  }
   auto close_status = archive.CloseEntryWithStatus();
   if (!close_status) {
     return std::unexpected(close_status.error());
@@ -754,24 +816,23 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
   if (thread_count == 0) {
     thread_count = kDefaultThreadCountFallback;
   }
-  std::atomic<bool> stop_requested{false};
+  std::stop_source stop_source;
   std::latch completion_latch{static_cast<std::ptrdiff_t>(thread_count)};
-  std::vector<std::thread> workers;
+  std::vector<std::jthread> workers;
   workers.reserve(thread_count);
   for ([[maybe_unused]] const auto _ : std::views::iota(0u, thread_count)) {
-    workers.emplace_back([&]() {
+    workers.emplace_back([&path, &entries, &next_index, &remaining_limit, &results, &errors, &options, &regex_pattern,
+                          &regex_prefix_matcher, &keyword, &keyword_matcher, &completion_latch, &stop_source,
+                          chunk_size, context_size, stop_token = stop_source.get_token()]() {
       auto archive_or = ZipArchive::Open(path);
-      while (true) {
-        if (stop_requested.load(std::memory_order_relaxed)) {
-          break;
-        }
+      while (!stop_token.stop_requested()) {
         const size_t batch_start = next_index.fetch_add(kWorkBatchSize, std::memory_order_relaxed);
         if (batch_start >= entries.size()) {
           break;
         }
         const size_t batch_end = std::min(batch_start + kWorkBatchSize, entries.size());
         for (size_t idx = batch_start; idx < batch_end; ++idx) {
-          if (stop_requested.load(std::memory_order_relaxed)) {
+          if (stop_token.stop_requested()) {
             break;
           }
           int slot_budget = remaining_limit.load(std::memory_order_relaxed);
@@ -780,7 +841,7 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
             skipped.filename = entries[idx].first;
             skipped.truncated = true;
             results[idx] = std::move(skipped);
-            stop_requested.store(true, std::memory_order_relaxed);
+            stop_source.request_stop();
             continue;
           }
           const auto& entry = entries[idx];
@@ -797,10 +858,11 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
           if (regex_pattern.has_value()) {
             result_or = SearchFileRegex(archive, entry.first, entry.second, regex_pattern.value(), regex_prefix_matcher,
                                         chunk_size, context_size, max_in_memory_file_size, options.per_file_limit,
-                                        options.highlight);
+                                        options.highlight, stop_token);
           } else {
-            result_or = SearchFile(archive, entry.first, entry.second, keyword, keyword_matcher, chunk_size,
-                                   context_size, max_in_memory_file_size, options.per_file_limit, options.highlight);
+            result_or =
+                SearchFile(archive, entry.first, entry.second, keyword, keyword_matcher, chunk_size, context_size,
+                           max_in_memory_file_size, options.per_file_limit, options.highlight, stop_token);
           }
           if (!result_or) {
             errors[idx] = std::format(kErrorProcessingFormat, entry.first, result_or.error().message);
@@ -818,7 +880,7 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
             if (idx < results.size() && results[idx].has_value()) {
               results[idx]->truncated = true;
             }
-            stop_requested.store(true, std::memory_order_relaxed);
+            stop_source.request_stop();
             break;
           }
         }
@@ -827,10 +889,8 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
     });
   }
   completion_latch.wait();
-  for (std::thread& worker : workers) {
-    worker.join();
-  }
   const auto t2 = std::chrono::high_resolution_clock::now();
+  workers.clear();
   const std::chrono::duration<double> elapsed = t2 - t1;
 
   std::vector<SearchResult> finalized;
