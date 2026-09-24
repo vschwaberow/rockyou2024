@@ -2,6 +2,58 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-24
+
+### Stability & Large Archives
+
+- Fixed an inverted buffer threshold check in `SearchFile` and
+  `SearchFileRegex` (`<=` instead of `>=`). Files larger than 10 MB
+  are now streamed via chunks instead of buffered in memory, preventing
+  OOM crashes on multi-gigabyte or 150 GB wordlist archives. Small files
+  remain memory-buffered for speed.
+- ZIP index enumeration and offset lookups now use 64-bit minizip APIs
+  (`unzGetGlobalInfo64`, `unzGetCurrentFileInfo64`, `unzGetOffset64`),
+  eliminating 32-bit truncation and seek corruption on ZIP archives > 4 GB.
+- Expanded internal ZIP filename buffer from 256 to 1024 bytes.
+- Guaranteed archive handle closure via `CloseEntryWithStatus()` across
+  all file exit paths.
+
+### Machine Output & Piping
+
+- Suppressed the ASCII header banner when `--json`, `--count`, or
+  `--quiet` is passed, making stdout clean for downstream tools like `jq`.
+- Fixed a JSON formatting bug where the `occurrences` array was closed
+  with `}` instead of `]`.
+- Replaced integer string conversions in JSON serialization with
+  `std::format_to` into pre-allocated memory.
+
+### Performance & Memory
+
+- Checksum hash buffers (SHA-256 and BLAKE3) increased from 8 KB to
+  1 MB (`kHashBufferSize`), reducing file I/O syscalls by ~99%.
+- `BoyerMooreMatcher` precomputes the 256-entry bad-character table once
+  before worker dispatch instead of rebuilding it per chunk.
+- Inner Boyer-Moore search loop uses compile-time specialization
+  (`SearchImpl<bool CaseInsensitive>`), eliminating branch-on-invariant
+  overhead and performing zero-allocation on-the-fly case folding.
+- Streaming reads now use `std::string_view` over reusable buffers and
+  `std::make_unique_for_overwrite<char[]>`, eliminating zero-initialization
+  and per-chunk heap allocations.
+- Modernized utility interfaces with `std::span`, `std::ranges::upper_bound`,
+  `noexcept`, and `[[nodiscard]]`.
+
+### Concurrency
+
+- Parallel worker pool migrated to `std::jthread`, `std::stop_source`,
+  and cooperative `std::stop_token` cancellation.
+- Cooperative cancellation tokens are propagated directly into `SearchFile`
+  and `SearchFileRegex` inner I/O and chunk loops, allowing immediate abort
+  without continuing to read unneeded data.
+- Search loops now abort decompression immediately once `per_file_limit`
+  is reached (`result.truncated = true`).
+- Search duration (`elapsed`) now measures active computation directly
+  upon latch completion before thread teardown.
+
 ## [0.8.1] - 2026-08-20
 
 ### CI
