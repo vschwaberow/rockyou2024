@@ -535,6 +535,24 @@ TEST(SearchEngineTest, CLIJsonFlagProducesJsonOutput) {
   std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
   EXPECT_NE(content.find("\"total\""), std::string::npos);
   EXPECT_NE(content.find("\"file\":\"common.txt\""), std::string::npos);
+  EXPECT_EQ(content.find("____   ___"), std::string::npos);
+  EXPECT_EQ(content.front(), '{');
+}
+
+TEST(SearchEngineTest, CLICountFlagProducesOnlyNumber) {
+#if defined(_WIN32)
+  GTEST_SKIP() << "CLI shell tests require a POSIX shell";
+#endif
+  const auto out = CliTempFile("rockyou_cli_count.txt");
+  std::string cmd = QuotePath(GetSearchBinary()) + " " + QuotePath(TestDataPath("sample.zip").string()) +
+                    " password123 --count > " + QuotePath(out.string()) + " 2>&1";
+  int ret = std::system(cmd.c_str());
+  EXPECT_EQ(ret, 0);
+
+  std::ifstream f(out);
+  std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+  EXPECT_EQ(content.find("____   ___"), std::string::npos);
+  EXPECT_EQ(content, "1\n");
 }
 
 TEST(SearchEngineTest, CLIErrorOnMissingFileReturnsNonZero) {
