@@ -1,6 +1,6 @@
 # rockyou2024
 
-rockyou2024 is a command-line tool (native C++26 modules) that searches the rockyou2024 wordlist directly inside the ZIP archive — no unpacking required. Features both literal keyword search and powerful regex pattern matching for security research and password policy analysis.
+rockyou2024 is a command-line tool (native C++26 modules) that searches the rockyou2024 wordlist directly inside the ZIP archive — no unpacking required. Features literal keyword search with Boyer-Moore acceleration, full ZIP64 support (> 4 GB archives), low-memory streaming for massive (150 GB+) wordlists, and powerful regex pattern matching.
 
 ## Quick start
 
@@ -9,18 +9,18 @@ Prebuilt archives ship with each GitHub release. Download the one that matches y
 ### Linux / macOS
 
 ```bash
-download_url=https://github.com/vschwaberow/rockyou2024/releases/download/v0.8.1/search-linux-v0.8.1.zip
+download_url=https://github.com/vschwaberow/rockyou2024/releases/download/v0.9.0/search-linux-v0.9.0.zip
 curl -LO "$download_url"
-unzip search-linux-v0.8.1.zip -d rockyou2024-linux
+unzip search-linux-v0.9.0.zip -d rockyou2024-linux
 ```
 
-Replace the URL with the macOS package when needed (`https://github.com/vschwaberow/rockyou2024/releases/download/v0.8.1/search-macos-v0.8.1.zip`).
+Replace the URL with the macOS package when needed (`https://github.com/vschwaberow/rockyou2024/releases/download/v0.9.0/search-macos-v0.9.0.zip`).
 
 ### Windows
 
 ```powershell
-Invoke-WebRequest -Uri https://github.com/vschwaberow/rockyou2024/releases/download/v0.8.1/search-windows-v0.8.1.zip -OutFile search-windows-v0.8.1.zip
-Expand-Archive -Path search-windows-v0.8.1.zip -DestinationPath rockyou2024-windows
+Invoke-WebRequest -Uri https://github.com/vschwaberow/rockyou2024/releases/download/v0.9.0/search-windows-v0.9.0.zip -OutFile search-windows-v0.9.0.zip
+Expand-Archive -Path search-windows-v0.9.0.zip -DestinationPath rockyou2024-windows
 ```
 
 ## Usage
@@ -35,10 +35,8 @@ From the extracted folder:
 PowerShell is similar:
 
 ```powershell
-.
-search.exe <zip_file> <keyword> [-i] [--quiet|--json] [--count] [--stats] [--limit N] [--per-file-limit N] [--threads N] [--chunk BYTES] [--context CHARS] [--checksum sha256:HEX|blake3:HEX] [--highlight] [--regex] [--regex-mode MODE]
-.
-search.exe --interactive
+.\search.exe <zip_file> <keyword> [-i] [--quiet|--json] [--count] [--stats] [--limit N] [--per-file-limit N] [--threads N] [--chunk BYTES] [--context CHARS] [--checksum sha256:HEX|blake3:HEX] [--highlight] [--regex] [--regex-mode MODE]
+.\search.exe --interactive
 ```
 
 The tool exits with `0` on success. On errors you’ll get a short status message explaining what went wrong.
@@ -49,35 +47,39 @@ Enable regex mode with `--regex` to search for patterns instead of literal keywo
 
 ```bash
 # Find email patterns
-./search rockyou2024.zip --regex ‘[a-z]+@[a-z]+\.[a-z]+’
+./search rockyou2024.zip --regex '[a-z]+@[a-z]+\.[a-z]+'
 
 # Find passwords with policy violations (e.g., ends with 3+ digits)
-./search rockyou2024.zip --regex ‘^[A-Za-z].*[0-9]{3}$’
+./search rockyou2024.zip --regex '^[A-Za-z].*[0-9]{3}$'
 
 # Case-insensitive regex with JSON output
-./search rockyou2024.zip --regex -i --json ‘pass.*[0-9]+’
+./search rockyou2024.zip --regex -i --json 'pass.*[0-9]+'
 
 # Use different regex engines
-./search rockyou2024.zip --regex --regex-mode grep ‘http://www\.’
+./search rockyou2024.zip --regex --regex-mode grep 'http://www\.'
 
 # Complex pattern with alternation
-./search rockyou2024.zip --regex ‘(admin|root|password).*[0-9]’
+./search rockyou2024.zip --regex '(admin|root|password).*[0-9]'
 ```
 
 Supported regex modes: `ecmascript` (default), `awk`, `grep`, `egrep`
 
-## Count mode
+## Piping & machine output
 
-Use `--count` to print only the total number of matches — no context, no details:
+In `--json`, `--count`, and `--quiet` modes, header banners are automatically suppressed from `stdout`, making output safe to pipe into tools like `jq`:
 
 ```bash
-./search rockyou2024.zip password123 --count           # prints a number
+# Extract matching files via jq
+./search rockyou2024.zip password123 --json | jq -r '.results[] | select(.count > 0) | .file'
+
+# Print match count only
+./search rockyou2024.zip password123 --count           # prints a bare number
 ./search rockyou2024.zip password123 --count --json    # prints {"total":N}
 ```
 
 ## Statistics
 
-Use `--stats` to print search statistics to stderr (stdout output is unaffected):
+Use `--stats` to print search statistics to stderr (stdout output remains clean for piping):
 
 ```bash
 ./search rockyou2024.zip password123 --stats
