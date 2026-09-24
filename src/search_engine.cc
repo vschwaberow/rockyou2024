@@ -23,6 +23,7 @@ module;
 #include <latch>
 #include <limits>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <ranges>
@@ -68,63 +69,84 @@ struct SearchResult {
   std::string error;
 };
 
-void LowerInPlace(std::string* value) {
-  std::transform(value->begin(), value->end(), value->begin(),
-                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-}
+class BoyerMooreMatcher {
+public:
+  BoyerMooreMatcher(std::string_view pattern, bool case_insensitive) : case_insensitive_(case_insensitive) {
+    if (case_insensitive) {
+      pattern_.resize(pattern.size());
+      std::transform(pattern.begin(), pattern.end(), pattern_.begin(),
+                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    } else {
+      pattern_ = std::string(pattern);
+    }
 
-std::vector<size_t> BoyerMoore(std::string_view text, std::string_view pattern) {
-  std::vector<size_t> results;
-  const int m = static_cast<int>(pattern.length());
-  const int n = static_cast<int>(text.length());
-  if (m == 0 || n == 0 || m > n) {
+    bad_char_.fill(-1);
+    const auto m = static_cast<std::ptrdiff_t>(pattern_.length());
+    for (std::ptrdiff_t i = 0; i < m; ++i) {
+      bad_char_[static_cast<unsigned char>(pattern_[static_cast<size_t>(i)])] = i;
+    }
+  }
+
+  [[nodiscard]] std::vector<size_t> Search(std::string_view text) const {
+    if (case_insensitive_) {
+      return SearchImpl<true>(text);
+    }
+    return SearchImpl<false>(text);
+  }
+
+  [[nodiscard]] size_t pattern_length() const noexcept { return pattern_.length(); }
+
+private:
+  template <bool CaseInsensitive> [[nodiscard]] std::vector<size_t> SearchImpl(std::string_view text) const {
+    std::vector<size_t> results;
+    const auto m = static_cast<std::ptrdiff_t>(pattern_.length());
+    const auto n = static_cast<std::ptrdiff_t>(text.length());
+    if (m == 0 || n == 0 || m > n) {
+      return results;
+    }
+
+    const auto normalize = [](char c) noexcept -> unsigned char {
+      const auto uc = static_cast<unsigned char>(c);
+      if constexpr (CaseInsensitive) {
+        return static_cast<unsigned char>(std::tolower(uc));
+      } else {
+        return uc;
+      }
+    };
+
+    std::ptrdiff_t shift = 0;
+    while (shift <= n - m) {
+      std::ptrdiff_t j = m - 1;
+      while (j >= 0 && static_cast<unsigned char>(pattern_[static_cast<size_t>(j)]) ==
+                           normalize(text[static_cast<size_t>(shift + j)])) {
+        --j;
+      }
+      if (j < 0) {
+        results.push_back(static_cast<size_t>(shift));
+        if (shift + m < n) {
+          shift += m - bad_char_[normalize(text[static_cast<size_t>(shift + m)])];
+        } else {
+          shift += 1;
+        }
+      } else {
+        shift += std::max<std::ptrdiff_t>(1, j - bad_char_[normalize(text[static_cast<size_t>(shift + j)])]);
+      }
+    }
     return results;
   }
-  std::array<int, 256> bad_char;
-  bad_char.fill(-1);
-  for (int i = 0; i < m; ++i) {
-    bad_char[static_cast<unsigned char>(pattern[i])] = i;
-  }
-  int shift = 0;
-  while (shift <= n - m) {
-    int j = m - 1;
-    while (j >= 0 && pattern[j] == text[shift + j]) {
-      --j;
-    }
-    if (j < 0) {
-      results.push_back(static_cast<size_t>(shift));
-      shift += (shift + m < n) ? m - bad_char[static_cast<unsigned char>(text[shift + m])] : 1;
-    } else {
-      shift += std::max(1, j - bad_char[static_cast<unsigned char>(text[shift + j])]);
-    }
-  }
-  return results;
-}
 
-std::vector<size_t> SearchPositions(std::string_view text, std::string_view pattern, bool case_insensitive) {
-  if (!case_insensitive) {
-    return BoyerMoore(text, pattern);
-  }
-  std::string lowered(text);
-  LowerInPlace(&lowered);
-  return BoyerMoore(lowered, pattern);
-}
+  std::string pattern_;
+  std::array<std::ptrdiff_t, 256> bad_char_{};
+  bool case_insensitive_{false};
+};
 
-std::vector<RegexMatch> SearchMatchesHybrid(std::string_view text, const RegexPattern& regex_pattern) {
-  std::string literal_prefix = GetLiteralPrefixForFastPath(regex_pattern);
-  if (literal_prefix.empty() || literal_prefix.length() < 3) {
+std::vector<RegexMatch> SearchMatchesHybrid(std::string_view text, const RegexPattern& regex_pattern,
+                                            const std::optional<BoyerMooreMatcher>& prefix_matcher) {
+  if (!prefix_matcher.has_value()) {
     return RegexSearchAll(regex_pattern, text);
   }
 
-  std::vector<size_t> candidates;
-  {
-    std::string lowered(text);
-    LowerInPlace(&lowered);
-    std::string prefix_lower = literal_prefix;
-    LowerInPlace(&prefix_lower);
-    candidates = BoyerMoore(lowered, prefix_lower);
-  }
-
+  std::vector<size_t> candidates = prefix_matcher->Search(text);
   std::vector<RegexMatch> verified;
   verified.reserve(candidates.size());
 
@@ -355,12 +377,13 @@ std::expected<std::string, rockyou::AppError> ComputeSha256Hex(const std::string
   if (SHA256_Init(&ctx) != 1) {
     return std::unexpected(MakeError(ErrorCode::ChecksumMismatch, std::string(kChecksumMismatchError)));
   }
-  std::array<unsigned char, 8192> buffer{};
+  constexpr size_t kHashBufferSize = 1024 * 1024;
+  const auto buffer = std::make_unique_for_overwrite<unsigned char[]>(kHashBufferSize);
   while (file.good()) {
-    file.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(buffer.size()));
+    file.read(reinterpret_cast<char*>(buffer.get()), static_cast<std::streamsize>(kHashBufferSize));
     const std::streamsize read_bytes = file.gcount();
     if (read_bytes > 0) {
-      if (SHA256_Update(&ctx, buffer.data(), static_cast<size_t>(read_bytes)) != 1) {
+      if (SHA256_Update(&ctx, buffer.get(), static_cast<size_t>(read_bytes)) != 1) {
         return std::unexpected(MakeError(ErrorCode::ChecksumMismatch, std::string(kChecksumMismatchError)));
       }
     }
@@ -386,12 +409,13 @@ std::expected<std::string, AppError> ComputeBlake3Hex(const std::string& path) {
   }
   blake3_hasher hasher;
   blake3_hasher_init(&hasher);
-  std::array<unsigned char, 8192> buffer{};
+  constexpr size_t kHashBufferSize = 1024 * 1024;
+  const auto buffer = std::make_unique_for_overwrite<unsigned char[]>(kHashBufferSize);
   while (file.good()) {
-    file.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(buffer.size()));
+    file.read(reinterpret_cast<char*>(buffer.get()), static_cast<std::streamsize>(kHashBufferSize));
     const std::streamsize read_bytes = file.gcount();
     if (read_bytes > 0) {
-      blake3_hasher_update(&hasher, buffer.data(), static_cast<size_t>(read_bytes));
+      blake3_hasher_update(&hasher, buffer.get(), static_cast<size_t>(read_bytes));
     }
   }
   std::array<unsigned char, BLAKE3_OUT_LEN> out{};
@@ -445,10 +469,11 @@ std::expected<void, rockyou::AppError> ValidateChecksum(const std::string& path,
   return compare_hex(expectation->algorithm, expectation->hex);
 }
 
-std::expected<SearchResult, rockyou::AppError>
-SearchFile(ZipArchive& archive, const std::string& name, const ZipIndexEntry& entry, const std::string& keyword,
-           std::string_view pattern, bool case_insensitive, size_t chunk_size, size_t context_size,
-           size_t max_in_memory_file_size, std::optional<int> per_file_limit, bool highlight) {
+std::expected<SearchResult, rockyou::AppError> SearchFile(ZipArchive& archive, const std::string& name,
+                                                          const ZipIndexEntry& entry, const std::string& keyword,
+                                                          const BoyerMooreMatcher& matcher, size_t chunk_size,
+                                                          size_t context_size, size_t max_in_memory_file_size,
+                                                          std::optional<int> per_file_limit, bool highlight) {
   auto open_res = archive.OpenEntry(name, entry);
   if (!open_res) {
     return std::unexpected(open_res.error());
@@ -477,7 +502,7 @@ SearchFile(ZipArchive& archive, const std::string& name, const ZipIndexEntry& en
     buffer.resize(total);
     std::vector<size_t> newline_offsets;
     AppendNewlines(buffer, 0, &newline_offsets);
-    const auto positions = SearchPositions(buffer, pattern, case_insensitive);
+    const auto positions = matcher.Search(buffer);
     for (size_t pos : positions) {
       const auto line_column = ComputeLineColumn(newline_offsets, pos);
       const std::string context = BuildHighlightedContext(buffer, pos, keyword_length, context_size, highlight);
@@ -511,7 +536,7 @@ SearchFile(ZipArchive& archive, const std::string& name, const ZipIndexEntry& en
     const size_t prefix_length = overlap.size();
     const size_t base = processed >= prefix_length ? processed - prefix_length : 0;
     std::string search_text = overlap + chunk;
-    const auto positions = SearchPositions(search_text, pattern, case_insensitive);
+    const auto positions = matcher.Search(search_text);
     const size_t threshold = processed >= prefix_length ? processed - prefix_length : 0;
     for (size_t pos : positions) {
       const size_t absolute = base + pos;
@@ -545,11 +570,11 @@ SearchFile(ZipArchive& archive, const std::string& name, const ZipIndexEntry& en
   return result;
 }
 
-std::expected<SearchResult, rockyou::AppError> SearchFileRegex(ZipArchive& archive, const std::string& name,
-                                                               const ZipIndexEntry& entry,
-                                                               const RegexPattern& regex_pattern, size_t chunk_size,
-                                                               size_t context_size, size_t max_in_memory_file_size,
-                                                               std::optional<int> per_file_limit, bool highlight) {
+std::expected<SearchResult, rockyou::AppError>
+SearchFileRegex(ZipArchive& archive, const std::string& name, const ZipIndexEntry& entry,
+                const RegexPattern& regex_pattern, const std::optional<BoyerMooreMatcher>& prefix_matcher,
+                size_t chunk_size, size_t context_size, size_t max_in_memory_file_size,
+                std::optional<int> per_file_limit, bool highlight) {
   auto open_res = archive.OpenEntry(name, entry);
   if (!open_res) {
     return std::unexpected(open_res.error());
@@ -576,7 +601,7 @@ std::expected<SearchResult, rockyou::AppError> SearchFileRegex(ZipArchive& archi
     std::vector<size_t> newline_offsets;
     AppendNewlines(buffer, 0, &newline_offsets);
 
-    const auto matches = SearchMatchesHybrid(buffer, regex_pattern);
+    const auto matches = SearchMatchesHybrid(buffer, regex_pattern, prefix_matcher);
     for (const auto& match : matches) {
       const auto line_column = ComputeLineColumn(newline_offsets, match.position);
       const std::string context =
@@ -616,7 +641,7 @@ std::expected<SearchResult, rockyou::AppError> SearchFileRegex(ZipArchive& archi
     const size_t base = processed >= prefix_length ? processed - prefix_length : 0;
     std::string search_text = overlap + chunk;
 
-    const auto matches = SearchMatchesHybrid(search_text, regex_pattern);
+    const auto matches = SearchMatchesHybrid(search_text, regex_pattern, prefix_matcher);
     const size_t threshold = processed >= prefix_length ? processed - prefix_length : 0;
 
     for (const auto& match : matches) {
@@ -716,11 +741,14 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
   std::vector<std::optional<std::string>> errors(entries.size());
   std::atomic<size_t> next_index{0};
   std::atomic<int> remaining_limit{options.limit.has_value() ? options.limit.value() : std::numeric_limits<int>::max()};
-  std::string pattern_storage = keyword;
-  if (options.case_insensitive && !options.regex) {
-    LowerInPlace(&pattern_storage);
+  const BoyerMooreMatcher keyword_matcher(keyword, options.case_insensitive);
+  std::optional<BoyerMooreMatcher> regex_prefix_matcher;
+  if (regex_pattern.has_value()) {
+    std::string prefix = GetLiteralPrefixForFastPath(*regex_pattern);
+    if (!prefix.empty() && prefix.length() >= 3) {
+      regex_prefix_matcher.emplace(prefix, options.case_insensitive);
+    }
   }
-  const std::string_view pattern = pattern_storage;
   const auto t1 = std::chrono::high_resolution_clock::now();
   unsigned int thread_count = options.thread_count.value_or(std::thread::hardware_concurrency());
   if (thread_count == 0) {
@@ -767,13 +795,12 @@ Result<void> SearchZip(const std::string& path, const std::string& keyword, cons
           }
           ZipArchive& archive = *archive_or;
           if (regex_pattern.has_value()) {
-            result_or =
-                SearchFileRegex(archive, entry.first, entry.second, regex_pattern.value(), chunk_size, context_size,
-                                max_in_memory_file_size, options.per_file_limit, options.highlight);
+            result_or = SearchFileRegex(archive, entry.first, entry.second, regex_pattern.value(), regex_prefix_matcher,
+                                        chunk_size, context_size, max_in_memory_file_size, options.per_file_limit,
+                                        options.highlight);
           } else {
-            result_or =
-                SearchFile(archive, entry.first, entry.second, keyword, pattern, options.case_insensitive, chunk_size,
-                           context_size, max_in_memory_file_size, options.per_file_limit, options.highlight);
+            result_or = SearchFile(archive, entry.first, entry.second, keyword, keyword_matcher, chunk_size,
+                                   context_size, max_in_memory_file_size, options.per_file_limit, options.highlight);
           }
           if (!result_or) {
             errors[idx] = std::format(kErrorProcessingFormat, entry.first, result_or.error().message);

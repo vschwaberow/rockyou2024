@@ -146,6 +146,17 @@ TEST(SearchEngineTest, SearchZipRejectsWrongChecksum) {
   }
 }
 
+TEST(SearchEngineTest, SearchZipRejectsWrongBlake3Checksum) {
+  rockyou::SearchOptions options;
+  options.checksum = "blake3:0000000000000000000000000000000000000000000000000000000000000000";
+  const auto res = rockyou::SearchZip(TestDataPath("sample.zip").string(), "password123", options);
+  EXPECT_FALSE(res.has_value());
+  if (!res) {
+    EXPECT_EQ(res.error().code, rockyou::ErrorCode::ChecksumMismatch);
+    EXPECT_EQ(res.error().message, std::string(rockyou::kChecksumMismatchError));
+  }
+}
+
 TEST(SearchEngineTest, SearchZipAcceptsCorrectSha256Checksum) {
   rockyou::SearchOptions options;
   // Precomputed SHA-256 of tests/data/sample.zip (see Phase 1 plan)
